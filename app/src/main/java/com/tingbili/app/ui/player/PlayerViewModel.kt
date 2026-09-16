@@ -99,7 +99,11 @@ class PlayerViewModel(
 
     fun toggleFavorite() {
         val r = holder.record.value ?: return
-        viewModelScope.launch { library.toggleFavorite(r.id, !r.isFavorite) }
+        val newFav = !r.isFavorite
+        // 本地立即同步，保证 UI 立刻反馈（bind 轮询会从 holder.record 重建 state）
+        holder.updateRecord(r.copy(isFavorite = newFav))
+        _state.value = _state.value.copy(record = r.copy(isFavorite = newFav))
+        viewModelScope.launch { library.toggleFavorite(r.id, newFav) }
     }
 
     companion object {

@@ -60,6 +60,9 @@ class PlayerHolder(context: Context) {
         queueIndex = index.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
     }
 
+    /** 更新当前播放记录（如收藏状态），供 UI 立即反馈 */
+    fun updateRecord(record: BookRecord) { _record.value = record }
+
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
     fun seekTo(ms: Long) = player.seekTo(ms)
