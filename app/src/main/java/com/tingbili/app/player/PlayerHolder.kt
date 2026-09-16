@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.tingbili.app.data.local.BookRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +16,17 @@ import kotlinx.coroutines.flow.StateFlow
  */
 class PlayerHolder(context: Context) {
     private val appContext = context.applicationContext
-    val player: ExoPlayer = ExoPlayer.Builder(appContext).build()
+    // B站媒体 CDN 校验 Referer/User-Agent，缺省头会返回 403
+    private val dataSourceFactory = DefaultHttpDataSource.Factory()
+        .setDefaultRequestProperties(
+            mapOf(
+                "Referer" to "https://www.bilibili.com/",
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            )
+        )
+    val player: ExoPlayer = ExoPlayer.Builder(appContext)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+        .build()
 
     private val _record = MutableStateFlow<BookRecord?>(null)
     val record: StateFlow<BookRecord?> = _record

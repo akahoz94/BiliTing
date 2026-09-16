@@ -6,6 +6,7 @@ import com.tingbili.app.data.api.BiliApiService
 import com.tingbili.app.data.api.PlayUrlApi
 import com.tingbili.app.data.api.SearchApi
 import com.tingbili.app.data.api.WbiKeyStore
+import com.tingbili.app.data.api.WbiSigner
 import com.tingbili.app.data.api.buildHttpClient
 import com.tingbili.app.data.api.buildRetrofit
 import com.tingbili.app.data.local.AppDatabase
@@ -16,6 +17,7 @@ import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.data.repo.PlayRepository
 import com.tingbili.app.data.repo.SearchRepository
 import com.tingbili.app.player.PlayerHolder
+import kotlinx.coroutines.runBlocking
 
 class BiliTingApplication : Application() {
     lateinit var appDatabase: AppDatabase
@@ -39,11 +41,22 @@ class BiliTingApplication : Application() {
  * 避免引入 DI 框架。API/仓库实例全局唯一，跨屏幕共享。
  */
 class AppContainer(val app: BiliTingApplication) {
-    private val service: BiliApiService =
-        buildRetrofit(buildHttpClient("", "")).create(BiliApiService::class.java)
+    private val service: BiliApiService = run {
+        // B站风控要求匿名请求携带 buvid3：启动时读一次，没有则生成并持久化
+        val buvid3 = runBlocking {
+            var v = app.cookieStore.buvid3()
+            if (v.isBlank()) {
+                v = WbiSigner.randomBuvid3()
+                app.cookieStore.save(v, "")
+            }
+            v
+        }
+        val cookie = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+        buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
+    }
     private val wbiKeys = WbiKeyStore(service)
 
-    val searchApi = SearchApi(service, wbiKeys, app.cookieStore)
+    val searchApi = SearchApi(service, wbiKeys)
     val searchRepo = SearchRepository(searchApi)
     val playRepo = PlayRepository(PlayUrlApi(service, wbiKeys), AudioApi(service), service)
 

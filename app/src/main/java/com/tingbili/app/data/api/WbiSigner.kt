@@ -36,6 +36,13 @@ object WbiSigner {
         return sb.toString()
     }
 
+    /** buvid4：标准大写 UUID，模拟浏览器指纹，降低匿名请求被风控误判概率 */
+    fun randomBuvid4(): String {
+        val hex = "0123456789ABCDEF"
+        fun block(n: Int) = buildString { repeat(n) { append(hex.random()) } }
+        return "${block(8)}-${block(4)}-${block(4)}-${block(4)}-${block(12)}"
+    }
+
     private fun encode(s: String): String =
         java.net.URLEncoder.encode(s, "UTF-8")
             .replace("+", "%20").replace("*", "%2A")

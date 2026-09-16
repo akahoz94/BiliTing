@@ -2,9 +2,9 @@ package com.tingbili.app.data.api
 
 import com.tingbili.app.data.api.dto.AudioUrlData
 import com.tingbili.app.data.api.dto.BiliResponse
+import com.tingbili.app.data.api.dto.PageItem
 import com.tingbili.app.data.api.dto.PlayUrlData
 import com.tingbili.app.data.api.dto.SearchResult
-import com.tingbili.app.data.api.dto.ViewData
 import com.tingbili.app.data.api.dto.WbiNav
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -48,9 +48,9 @@ interface BiliApiService {
     @GET("audio/music-service-c/web/url")
     suspend fun audioUrl(@Query("sid") sid: Long): BiliResponse<AudioUrlData>
 
-    /** 视频详情：取分P cid 列表（Task 9 播放链路） */
-    @GET("x/web-interface/view")
-    suspend fun view(@Query("bvid") bvid: String): BiliResponse<ViewData>
+    /** 分P cid 列表：比 view 风控宽松，无需 wbi 签名（view 匿名请求易被 412 拦截） */
+    @GET("x/player/pagelist")
+    suspend fun pagelist(@Query("bvid") bvid: String): BiliResponse<List<PageItem>>
 }
 
 @kotlinx.serialization.Serializable
@@ -60,7 +60,7 @@ data class AudioInfo(
     @kotlinx.serialization.SerialName("duration") val durationSec: Long = 0
 )
 
-fun buildHttpClient(cookieHeader: String, buvid3: String): OkHttpClient =
+fun buildHttpClient(cookieHeader: String): OkHttpClient =
     OkHttpClient.Builder()
         .addInterceptor { chain ->
             val req = chain.request().newBuilder()

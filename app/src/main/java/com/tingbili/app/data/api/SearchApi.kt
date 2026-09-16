@@ -1,14 +1,22 @@
 package com.tingbili.app.data.api
 
 import com.tingbili.app.data.api.dto.SearchItem
-import com.tingbili.app.data.local.CookieStore
 
 class SearchApi(
     private val service: BiliApiService,
-    private val keys: WbiKeyStore,
-    private val cookies: CookieStore
+    private val keys: WbiKeyStore
 ) {
     suspend fun search(keyword: String, searchType: String = "video", page: Int = 1): List<SearchItem> {
+        var items = searchOnce(keyword, searchType, page)
+        // B站匿名搜索有软限流：连续请求偶发返回空结果，重试一次
+        if (page == 1 && items.isEmpty()) {
+            kotlinx.coroutines.delay(2500)
+            items = searchOnce(keyword, searchType, page)
+        }
+        return items
+    }
+
+    private suspend fun searchOnce(keyword: String, searchType: String, page: Int): List<SearchItem> {
         val (imgKey, subKey) = keys.keys()
         val params = mapOf(
             "keyword" to keyword,

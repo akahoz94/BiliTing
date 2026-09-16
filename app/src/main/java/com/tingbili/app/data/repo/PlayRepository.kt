@@ -18,21 +18,21 @@ class PlayRepository(
     }
 
     /**
-     * 视频详情 → 分P 播放记录 + 播放队列。
+     * 视频分P 信息 → 播放记录 + 播放队列。
      * record.id = "video:$bvid"，currentCid = 第一P cid，队列 pages.map { bvid to cid }。
-     * view 接口调用失败（数据为空）返回 null。
+     * 标题/作者由调用方回填（搜索结果自带，续播记录已存）。失败返回 null。
      */
     suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<Pair<String, Long>>>? {
-        val data = service.view(bvid).data ?: return null
-        val pages = data.pages
+        val pages = service.pagelist(bvid).data.orEmpty().filter { it.cid > 0 }
+        if (pages.isEmpty()) return null
         val record = BookRecord(
             id = "video:$bvid",
-            title = data.title,
-            owner = data.owner.name,
+            title = "",
+            owner = "",
             type = "video",
             totalParts = pages.size,
             currentPart = 1,
-            currentCid = pages.firstOrNull()?.cid,
+            currentCid = pages.first().cid,
             bvid = bvid
         )
         val queue = pages.map { bvid to it.cid }
