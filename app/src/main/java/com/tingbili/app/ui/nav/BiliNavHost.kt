@@ -14,17 +14,25 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.tingbili.app.BiliTingApplication
+import com.tingbili.app.data.api.dto.SearchItem
+import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.player.PlayerLauncher
 import com.tingbili.app.ui.history.HistoryScreen
 import com.tingbili.app.ui.player.PlayerScreen
 import com.tingbili.app.ui.search.SearchScreen
 import com.tingbili.app.ui.settings.SettingsScreen
 import com.tingbili.app.ui.shelf.ShelfScreen
+import kotlinx.coroutines.launch
 
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Shelf("shelf", "书架", Icons.Filled.Bookmarks),
@@ -39,6 +47,23 @@ fun BiliNavHost() {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    val context = LocalContext.current
+    val container = (context.applicationContext as BiliTingApplication).container
+    val scope = rememberCoroutineScope()
+    val launcher = remember {
+        PlayerLauncher(container.playerHolder, container.playRepo, container.libraryRepo)
+    }
+
+    fun playAndNavigate(item: SearchItem) {
+        scope.launch { launcher.playSearchItem(item) }
+        navController.navigate("player")
+    }
+
+    fun resumeAndNavigate(record: BookRecord) {
+        scope.launch { launcher.playRecord(record) }
+        navController.navigate("player")
+    }
 
     Scaffold(
         bottomBar = {
@@ -69,13 +94,13 @@ fun BiliNavHost() {
             modifier = Modifier.padding(padding)
         ) {
             composable(Tab.Shelf.route) {
-                ShelfScreen(onOpenPlayer = { navController.navigate("player") })
+                ShelfScreen(onOpenPlayer = ::resumeAndNavigate)
             }
             composable(Tab.Search.route) {
-                SearchScreen(onOpenPlayer = { navController.navigate("player") })
+                SearchScreen(onOpenPlayer = ::playAndNavigate)
             }
             composable(Tab.History.route) {
-                HistoryScreen(onOpenPlayer = { navController.navigate("player") })
+                HistoryScreen(onOpenPlayer = ::resumeAndNavigate)
             }
             composable(Tab.Settings.route) { SettingsScreen() }
             composable("player") { PlayerScreen() }

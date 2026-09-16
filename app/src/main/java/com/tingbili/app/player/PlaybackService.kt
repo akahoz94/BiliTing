@@ -20,10 +20,8 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     override fun onDestroy() {
-        mediaSession?.run {
-            player.release()
-            release()
-        }
+        // 只释放 MediaSession，不 release 播放器：ExoPlayer 由 Application 持有的 PlayerHolder 管理
+        mediaSession?.release()
         mediaSession = null
         super.onDestroy()
     }

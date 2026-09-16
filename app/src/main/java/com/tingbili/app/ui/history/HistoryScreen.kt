@@ -23,12 +23,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.ui.common.ListItemRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
-    onOpenPlayer: () -> Unit = {},
+    onOpenPlayer: (BookRecord) -> Unit = {},
     viewModel: HistoryViewModel = viewModel(factory = HistoryViewModel.Factory)
 ) {
     val history by viewModel.history.collectAsState()
@@ -52,7 +53,7 @@ fun HistoryScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp)) {
                 items(history, key = { it.id }) { record ->
-                    ListItemRow(record = record, onClick = onOpenPlayer)
+                    ListItemRow(record = record, onClick = { onOpenPlayer(record) })
                 }
             }
         }

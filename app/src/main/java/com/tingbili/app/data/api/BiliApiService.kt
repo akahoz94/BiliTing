@@ -4,6 +4,7 @@ import com.tingbili.app.data.api.dto.AudioUrlData
 import com.tingbili.app.data.api.dto.BiliResponse
 import com.tingbili.app.data.api.dto.PlayUrlData
 import com.tingbili.app.data.api.dto.SearchResult
+import com.tingbili.app.data.api.dto.ViewData
 import com.tingbili.app.data.api.dto.WbiNav
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,6 +47,10 @@ interface BiliApiService {
 
     @GET("audio/music-service-c/web/url")
     suspend fun audioUrl(@Query("sid") sid: Long): BiliResponse<AudioUrlData>
+
+    /** 视频详情：取分P cid 列表（Task 9 播放链路） */
+    @GET("x/web-interface/view")
+    suspend fun view(@Query("bvid") bvid: String): BiliResponse<ViewData>
 }
 
 @kotlinx.serialization.Serializable

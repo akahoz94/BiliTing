@@ -15,6 +15,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +29,7 @@ import com.tingbili.app.util.FormatUtil
 @Composable
 fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.Factory)) {
     LaunchedEffect(Unit) { viewModel.bind() }
+    DisposableEffect(Unit) { onDispose { viewModel.saveProgress() } }
     val s by viewModel.state.collectAsState()
     val record = s.record
     if (record == null) {
@@ -64,11 +66,11 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = { /* 倍速弹窗（Task 10） */ }) { Text("${s.speed}x") }
-                IconButton(onClick = { /* 上一集（Task 9 播放队列打通） */ }) { Text("⏮", style = MaterialTheme.typography.titleLarge) }
+                IconButton(onClick = viewModel::prevPart) { Text("⏮", style = MaterialTheme.typography.titleLarge) }
                 FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp)) {
                     Text(if (s.isPlaying) "⏸" else "▶", style = MaterialTheme.typography.headlineMedium)
                 }
-                IconButton(onClick = { /* 下一集（Task 9 播放队列打通） */ }) { Text("⏭", style = MaterialTheme.typography.titleLarge) }
+                IconButton(onClick = viewModel::nextPart) { Text("⏭", style = MaterialTheme.typography.titleLarge) }
                 TextButton(onClick = { /* 定时弹窗（Task 10） */ }) {
                     Text(if (s.sleepRemainSec > 0) "${(s.sleepRemainSec / 60) + 1}min" else "定时")
                 }

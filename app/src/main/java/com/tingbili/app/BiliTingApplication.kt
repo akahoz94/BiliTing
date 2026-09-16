@@ -45,7 +45,7 @@ class AppContainer(val app: BiliTingApplication) {
 
     val searchApi = SearchApi(service, wbiKeys, app.cookieStore)
     val searchRepo = SearchRepository(searchApi)
-    val playRepo = PlayRepository(PlayUrlApi(service, wbiKeys), AudioApi(service))
+    val playRepo = PlayRepository(PlayUrlApi(service, wbiKeys), AudioApi(service), service)
 
     val dao: BookRecordDao = app.appDatabase.bookRecordDao()
     val libraryRepo = LibraryRepository(dao)

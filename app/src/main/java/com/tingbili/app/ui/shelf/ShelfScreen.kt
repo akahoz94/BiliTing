@@ -18,12 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.ui.common.ListItemRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShelfScreen(
-    onOpenPlayer: () -> Unit = {},
+    onOpenPlayer: (BookRecord) -> Unit = {},
     viewModel: ShelfViewModel = viewModel(factory = ShelfViewModel.Factory)
 ) {
     val favorites by viewModel.favorites.collectAsState()
@@ -35,7 +36,7 @@ fun ShelfScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp)) {
                 items(favorites, key = { it.id }) { record ->
-                    ListItemRow(record = record, onClick = onOpenPlayer)
+                    ListItemRow(record = record, onClick = { onOpenPlayer(record) })
                 }
             }
         }

@@ -20,6 +20,7 @@ class PlayerHolder(context: Context) {
     val record: StateFlow<BookRecord?> = _record
 
     private var queue: List<Pair<String, Long>> = emptyList() // (bvid, cid) 或 (auid, 0)
+    private var queueIndex = 0
 
     fun play(
         record: BookRecord,
@@ -30,6 +31,7 @@ class PlayerHolder(context: Context) {
     ) {
         _record.value = record
         this.queue = queue
+        this.queueIndex = 0
         player.setMediaItem(
             MediaItem.Builder()
                 .setUri(audioUrl)
@@ -45,6 +47,17 @@ class PlayerHolder(context: Context) {
         player.seekTo(positionMs)
         player.prepare()
         player.play()
+    }
+
+    /** 当前播放队列（(bvid, cid) 列表） */
+    fun currentQueue(): List<Pair<String, Long>> = queue
+
+    /** 当前队列下标（0 起） */
+    fun currentQueueIndex(): Int = queueIndex
+
+    /** 切换队列下标（越界时钳制到边界） */
+    fun moveQueueTo(index: Int) {
+        queueIndex = index.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
     }
 
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()

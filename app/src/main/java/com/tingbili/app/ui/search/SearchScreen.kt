@@ -38,7 +38,7 @@ import com.tingbili.app.util.FormatUtil
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
-    onOpenPlayer: () -> Unit = {},
+    onOpenPlayer: (SearchItem) -> Unit = {},
     viewModel: SearchViewModel = viewModel(factory = SearchViewModel.Factory)
 ) {
     val s by viewModel.state.collectAsState()
@@ -69,7 +69,7 @@ fun SearchScreen(
             if (s.error != null) Text(s.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp))
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
                 items(s.results, key = { it.bvid.ifBlank { it.aid.toString() } }) { item ->
-                    SearchResultRow(item, onClick = onOpenPlayer)
+                    SearchResultRow(item, onClick = { onOpenPlayer(item) })
                 }
                 if (s.hasMore) {
                     item { TextButton(onClick = viewModel::loadMore, modifier = Modifier.fillMaxWidth()) { Text("加载更多") } }
