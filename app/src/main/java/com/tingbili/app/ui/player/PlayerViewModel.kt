@@ -1,0 +1,98 @@
+package com.tingbili.app.ui.player
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tingbili.app.BiliTingApplication
+import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.data.repo.LibraryRepository
+import com.tingbili.app.player.PlayerHolder
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+class PlayerViewModel(
+    private val holder: PlayerHolder,
+    private val library: LibraryRepository
+) : ViewModel() {
+    data class UiState(
+        val record: BookRecord? = null,
+        val isPlaying: Boolean = false,
+        val positionMs: Long = 0L,
+        val durationMs: Long = 0L,
+        val speed: Float = 1.0f,
+        val sleepRemainSec: Int = -1
+    )
+
+    private val _state = MutableStateFlow(UiState())
+    val state: StateFlow<UiState> = _state
+
+    private var sleepRemain = -1
+    private var sleepTotalMs = 0L
+
+    fun bind() {
+        viewModelScope.launch {
+            while (true) {
+                val p = holder.player
+                _state.value = UiState(
+                    record = holder.record.value,
+                    isPlaying = p.isPlaying,
+                    positionMs = p.currentPosition,
+                    durationMs = p.duration.coerceAtLeast(0L),
+                    speed = p.playbackParameters.speed,
+                    sleepRemainSec = sleepRemain
+                )
+                delay(500)
+            }
+        }
+    }
+
+    fun toggle() { holder.togglePlay() }
+    fun setSpeed(v: Float) { holder.setSpeed(v) }
+    fun seekTo(ms: Long) { holder.seekTo(ms) }
+
+    fun startSleep(minutes: Int) {
+        sleepTotalMs = minutes * 60_000L
+        sleepRemain = minutes * 60
+        viewModelScope.launch {
+            val start = System.currentTimeMillis()
+            while (System.currentTimeMillis() - start < sleepTotalMs) {
+                delay(1000)
+                sleepRemain = ((sleepTotalMs - (System.currentTimeMillis() - start)) / 1000).toInt()
+            }
+            holder.pause()
+            sleepRemain = -1
+        }
+    }
+
+    fun stopSleep() { sleepRemain = -1 }
+
+    fun saveProgress() {
+        val r = holder.record.value ?: return
+        viewModelScope.launch {
+            library.recordPlayed(
+                r.copy(
+                    progressMs = holder.player.currentPosition,
+                    durationMs = holder.player.duration.coerceAtLeast(0L)
+                )
+            )
+        }
+    }
+
+    fun toggleFavorite() {
+        val r = holder.record.value ?: return
+        viewModelScope.launch { library.toggleFavorite(r.id, !r.isFavorite) }
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as BiliTingApplication
+                PlayerViewModel(app.container.playerHolder, app.container.libraryRepo)
+            }
+        }
+    }
+}
