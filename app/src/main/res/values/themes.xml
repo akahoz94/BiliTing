@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.BiliTing" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>
