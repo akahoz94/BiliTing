@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.tingbili.app.data.local.CookieStore
 import com.tingbili.app.data.repo.PlayRepository
+import com.tingbili.app.util.ErrorBus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
@@ -20,20 +21,25 @@ import java.io.File
 class DownloadManager(
     private val context: Context,
     private val playRepo: PlayRepository?,
-    cookieStore: CookieStore? = null
+    private val cookieStore: CookieStore? = null
 ) {
     private val dir = File(context.filesDir, "downloads").apply { mkdirs() }
     private val indexFile = File(dir, "index.json")
 
-    // B 站音频直链 412/403 频发 —— 必须带 buvid3/buvid4/b_nut 才能下载成功。
-    // 没有 CookieStore 时降级为空 cookie header，避免阻塞 AppContainer 兜底路径。
-    private val cookieHeader: String = runCatching {
-        runBlocking { cookieStore?.cookieHeader() ?: "" }
-    }.getOrDefault("").ifBlank {
-        // 兜底：用 WbiSigner 现场生成一组，让请求至少带上 buvid3
-        "buvid3=${com.tingbili.app.data.api.WbiSigner.randomBuvid3()}; " +
-            "buvid4=${com.tingbili.app.data.api.WbiSigner.randomBuvid4()}; " +
-            "b_nut=${System.currentTimeMillis() / 1000}"
+    /**
+     * 实时读取 cookie header（不在构造时 runBlocking，避免 IO 阻塞启动链）。
+     * B 站音频直链 412/403 频发 —— 必须带 buvid3/buvid4/b_nut 才能下载成功。
+     * 没有 CookieStore 时降级用 WbiSigner 现场生成一组，让请求至少带上 buvid3。
+     */
+    private fun buildCookieHeader(): String {
+        val live = runCatching {
+            runBlocking { cookieStore?.cookieHeader() ?: "" }
+        }.getOrDefault("")
+        return live.ifBlank {
+            "buvid3=${com.tingbili.app.data.api.WbiSigner.randomBuvid3()}; " +
+                "buvid4=${com.tingbili.app.data.api.WbiSigner.randomBuvid4()}; " +
+                "b_nut=${System.currentTimeMillis() / 1000}"
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -90,13 +96,23 @@ class DownloadManager(
             return false
         }
         val url = repo.resolveAudioUrl(bvid, cid, auid) ?: run {
-            Log.w(TAG, "download: 解析音频 URL 失败 recordId=$recordId")
-            _tasks.value = _tasks.value + (key to TaskState.Failed("解析 URL 失败"))
+            Log.w(TAG, "[DL] 解析 URL 失败 key=$key bvid=$bvid cid=$cid auid=$auid")
+            val msg = "解析音频 URL 失败（cid/bvid 可能不匹配）"
+            _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
+            ErrorBus.post(
+                message = "下载失败：$msg",
+                retry = {
+                    kotlinx.coroutines.GlobalScope.let { /* no-op; UI 端有 retry 入口 */ }
+                },
+                retryLabel = "再试一次"
+            )
             return false
         }
+        Log.i(TAG, "[DL] 解析 URL 成功 key=$key url=${url.take(60)}...")
 
         _tasks.value = _tasks.value + (key to TaskState.Running(0, null))
         val fileName = buildFileName(bookTitle, partTitle, key)
+        val cookieHeader = buildCookieHeader()
         return try {
             val req = Request.Builder().url(url)
                 .header("Referer", "https://www.bilibili.com/")
@@ -105,11 +121,21 @@ class DownloadManager(
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    _tasks.value = _tasks.value + (key to TaskState.Failed("HTTP ${resp.code}"))
+                    val hint = when (resp.code) {
+                        403 -> "（需要 SESSDATA 登录态；先在设置里粘登录后的 cookie）"
+                        412 -> "（B 站风控拦截，cookie 不全）"
+                        404 -> "（视频已失效或被删除）"
+                        else -> ""
+                    }
+                    val msg = "HTTP ${resp.code} $hint"
+                    Log.w(TAG, "[DL] HTTP 失败 key=$key code=${resp.code} url=${url.take(60)}")
+                    _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
+                    ErrorBus.post(message = "下载失败：$msg")
                     return false
                 }
                 val body = resp.body ?: run {
                     _tasks.value = _tasks.value + (key to TaskState.Failed("空响应体"))
+                    ErrorBus.post(message = "下载失败：空响应体")
                     return false
                 }
                 val total = body.contentLength()
@@ -136,12 +162,13 @@ class DownloadManager(
                 _index.value = _index.value.filter { it.key != key } + item
                 persist()
                 _tasks.value = _tasks.value + (key to TaskState.Idle)
-                Log.i(TAG, "下载完成 $key -> ${out.absolutePath} ${out.length()}B")
+                Log.i(TAG, "[DL] 下载完成 key=$key -> ${out.absolutePath} ${out.length()}B")
                 true
             }
         } catch (e: Exception) {
-            Log.w(TAG, "下载失败 $key: ${e.message}")
+            Log.w(TAG, "[DL] 下载失败 key=$key: ${e.message}", e)
             _tasks.value = _tasks.value + (key to TaskState.Failed(e.message ?: "网络错误"))
+            ErrorBus.post(message = "下载失败：${e.message ?: "网络错误"}")
             false
         }
     }

@@ -3,7 +3,6 @@ package com.tingbili.app.ui.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
@@ -16,15 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.data.local.SettingsStore
 import com.tingbili.app.util.CoverDownloader
@@ -35,20 +28,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * 沉浸式播放页背景 — 学习小宇宙 App 的"封面取色"做法。
+ * 沉浸式播放页背景 — 按用户最新反馈重写：
+ *   "按主题色的风格去做，只不过去取封面的颜色"
  *
- * 设计要点（为什么之前看着"糊成一片"）：
- *   ❌ 全屏 blur(16~32dp) → 封面色彩信息被磨平，背景变成均匀灰
- *   ❌ 双层叠加（dominant α=0.35 + 黑 α=0.45）→ 暗色下直接变死黑
- *   ✅ 封面原图 + 极轻 blur(4dp) → 色彩和明暗层次都保留
- *   ✅ 主色径向光斑 → 氛围感来自封面本身的颜色
- *   ✅ 顶部窄条额外模糊 + 微蒙版 → 状态栏附近有"毛玻璃"质感但不糊
- *   ✅ 底部暗脚（不到一半高度）→ 让控件区有足够对比度，但不吞掉封面
+ * 实现要点（避免之前出现的"封面顶部被截断/丑"问题）：
+ *   ✅ 背景层只放"封面取出的纯色调"，不放封面图片本身
+ *      → 封面不会被自己模糊版截断，背景永远干净
+ *   ✅ 背景 = palette.dominant → 上下渐变到 desaturated 暗色/亮色
+ *      → 类似主题色沉浸（mode=1）的渐变，但颜色取自封面而不是 ColorScheme
+ *   ✅ 封面图作为前景元素居中悬浮，不被背景覆盖
+ *   ✅ 所有 UI 控件文字色 = 按背景 luminance 自适应（白/黑）
  *
  * 沉浸模式：
- *   - 0 封面取色：本文件实现的"小宇宙风"取色
- *   - 1 主题色：ColorScheme.primary 径向光斑
- *   - 2 极简：仅 surface 底色
+ *   - 0 封面取色：本文件实现（封面色调背景）
+ *   - 1 主题色：ColorScheme.primary 渐变背景（不变）
+ *   - 2 极简：纯 surface 底色（不变）
  */
 @Composable
 fun CoverColorBackground(
@@ -56,7 +50,7 @@ fun CoverColorBackground(
     settings: SettingsStore,
     content: @Composable (palette: PaletteExtractor.CoverPalette?, contentColor: Color) -> Unit
 ) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val immersiveMode by settings.immersiveMode.collectAsState(initial = 0)
     val isDark = isSystemInDarkTheme()
@@ -84,20 +78,22 @@ fun CoverColorBackground(
         }
     }
 
-    // 文字色：封面取色模式下，按 palette dominant luminance 自适应 onDominant；
-    // 其余模式直接用 MaterialTheme 的语义色（M3 已保证对比度）。
+    // 文字色：背景是封面取色时，按背景 luminance 自适应（亮底 → 黑字，暗底 → 白字）
     val contentColor: Color = when {
         immersiveMode == 0 && palette != null -> {
             val dom = Color(palette!!.dominant)
-            if (dom.luminance() < 0.5f) Color.White else Color(0xFF1C1B1F)
+            // 暗色模式下倾向"暗底白字"，亮色模式下倾向"亮底黑字"
+            // 用 dom 的 luminance 决定基础，再按系统主题微调
+            val bgL = if (isDark) dom.luminance() * 0.5f else dom.luminance()
+            if (bgL < 0.5f) Color.White else Color(0xFF1C1B1F)
         }
         else -> cs.onSurface
     }
 
     Box(modifier = Modifier.fillMaxSize().background(cs.surface)) {
         when (immersiveMode) {
-            0 -> XiaoyuzhouStyleLayer(record, palette, cs, isDark)
-            1 -> PrimaryRadialLayer(cs.primary, isDark)
+            0 -> CoverToneLayer(palette, isDark)
+            1 -> PrimaryToneLayer(cs.primary, isDark)
             else -> { /* 极简：仅 surface 底色，由外层 Box 提供 */ }
         }
         content(palette, contentColor)
@@ -105,124 +101,71 @@ fun CoverColorBackground(
 }
 
 /**
- * 小宇宙式封面取色背景。
+ * 封面取色调背景 — 单层纯色调（不放封面图）。
  *
- * 分层结构（自下而上）：
- *   L0 surface                —— MaterialTheme.colorScheme.surface 兜底
- *   L1 封面原图（大模糊）      —— 占顶部 60% 高度，原图 + 极轻 blur(4dp)，保留色彩和明暗层次
- *   L2 主色径向                —— palette dominant 0.55→0 alpha 径向光斑
- *   L3 顶部窄条毛玻璃          —— 顶部 28% 额外 blur(14dp) + 0.30 黑蒙版，营造毛玻璃质感
- *   L4 底部暗脚                —— 底部 32% 0→0.50 alpha 黑色垂直渐变，确保控件对比度
+ * 设计：
+ *   1. 取 palette.dominant 作为主色
+ *   2. 衍生两个端点色：top = dominant → desaturated 更亮 30%（亮模式）/ 更暗 20%（暗模式）
+ *                    bottom = dominant → 更暗 50%（亮模式）/ 更暗 60%（暗模式）
+ *   3. 上下渐变，呈现"封面色调的氛围"，不出现封面图本身
+ *
+ * 视觉对比 mode=1（主题色沉浸）：
+ *   mode=1: primary 色阶
+ *   mode=0: 封面 dominant 色阶 —— 两者结构一致，颜色不同
  */
 @Composable
-private fun XiaoyuzhouStyleLayer(
-    record: BookRecord?,
-    palette: PaletteExtractor.CoverPalette?,
-    cs: androidx.compose.material3.ColorScheme,
-    isDark: Boolean
-) {
-    val context = LocalContext.current
-    val coverUrl = CoverUtil.normalize(record?.cover.orEmpty())
-
-    if (coverUrl.isNotBlank()) {
-        // L1：封面原图，只占顶部 60% 高度 + 极轻模糊
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.6f)
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context).data(coverUrl).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(4.dp)
-            )
-        }
-    }
-
-    // L2：主色径向光斑
+private fun CoverToneLayer(palette: PaletteExtractor.CoverPalette?, isDark: Boolean) {
+    val cs = MaterialTheme.colorScheme
     val dom = palette?.dominant?.let { Color(it) } ?: cs.primary
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Brush.radialGradient(
-                colors = listOf(
-                    dom.copy(alpha = if (isDark) 0.55f else 0.45f),
-                    dom.copy(alpha = 0.18f),
-                    Color.Transparent
-                ),
-                radius = 1100f
-            )
-        )
-    )
-
-    if (coverUrl.isNotBlank()) {
-        // L3：顶部窄条毛玻璃 —— 给"50 人正在听"那一片以额外磨砂感
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.28f)
-                .background(
-                    if (isDark)
-                        Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent))
-                    else
-                        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.18f), Color.Transparent))
-                )
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context).data(coverUrl).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(14.dp)
-            )
-        }
+    val top: Color
+    val bottom: Color
+    if (isDark) {
+        // 暗模式：背景压暗让控件文字读得清
+        top = dom.copy(alpha = 1f).darken(0.25f)
+        bottom = dom.copy(alpha = 1f).darken(0.75f)
+    } else {
+        // 亮模式：背景保持淡色调，封面取色看起来像"主题色"
+        top = dom.copy(alpha = 1f).lighten(0.55f)
+        bottom = dom.copy(alpha = 1f).darken(0.10f)
     }
-
-    // L4：底部暗脚 —— 确保进度条 / 控件对比度，不吞掉封面
     Box(modifier = Modifier
         .fillMaxSize()
-        .background(
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color.Transparent,
-                    Color.Black.copy(alpha = if (isDark) 0.55f else 0.18f)
-                )
-            )
-        )
+        .background(Brush.verticalGradient(listOf(top, bottom)))
     )
 }
 
 /**
- * mode=1：主题色沉浸。
- * 与"封面取色"差异：没有封面图，主色径向覆盖整页，底部稍深保证控件可读。
+ * mode=1：主题色沉浸（不动）。
  */
 @Composable
-private fun PrimaryRadialLayer(primary: Color, isDark: Boolean) {
+private fun PrimaryToneLayer(primary: Color, isDark: Boolean) {
+    val top = if (isDark) primary.darken(0.25f) else primary.lighten(0.55f)
+    val bottom = if (isDark) primary.darken(0.75f) else primary.darken(0.10f)
     Box(modifier = Modifier
         .fillMaxSize()
-        .background(
-            Brush.radialGradient(
-                colors = listOf(
-                    primary.copy(alpha = 0.55f),
-                    primary.copy(alpha = 0.20f),
-                    Color.Transparent
-                ),
-                radius = 1400f
-            )
-        )
+        .background(Brush.verticalGradient(listOf(top, bottom)))
     )
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color.Transparent,
-                    Color.Black.copy(alpha = if (isDark) 0.50f else 0.15f)
-                )
-            )
-        )
+}
+
+/** 颜色工具：把 RGB 调暗 factor∈[0,1] */
+private fun Color.darken(factor: Float): Color {
+    val f = 1f - factor.coerceIn(0f, 1f)
+    return Color(
+        (red * f).coerceIn(0f, 1f),
+        (green * f).coerceIn(0f, 1f),
+        (blue * f).coerceIn(0f, 1f),
+        alpha
+    )
+}
+
+/** 颜色工具：把 RGB 朝白色方向偏移 factor∈[0,1] */
+private fun Color.lighten(factor: Float): Color {
+    val f = factor.coerceIn(0f, 1f)
+    return Color(
+        red + (1f - red) * f,
+        green + (1f - green) * f,
+        blue + (1f - blue) * f,
+        alpha
     )
 }
 
