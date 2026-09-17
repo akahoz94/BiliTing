@@ -2,26 +2,27 @@ package com.tingbili.app.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 @Entity(tableName = "book_records")
+@Serializable
 data class BookRecord(
-    @PrimaryKey val id: String,          // "video:bvid" 或 "audio:auid"
+    @PrimaryKey val id: String,
     val title: String,
-    val owner: String,                   // UP主/作者
-    val type: String,                    // "video" / "audio"
-    val cover: String = "",              // 封面图 URL
-    val totalParts: Int = 0,             // 总集数（0=未知）
-    val currentPart: Int = 1,            // 当前第几集
-    val currentCid: Long? = null,        // 当前集 cid（video）
-    val progressMs: Long = 0L,           // 集内播放进度
-    val durationMs: Long = 0L,           // 集总时长
+    val owner: String,
+    val type: String,
+    val cover: String = "",
+    val totalParts: Int = 0,
+    val currentPart: Int = 1,
+    val currentCid: Long? = null,
+    val progressMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val speed: Float = 1.0f,
     val isFavorite: Boolean = false,
     val favoriteAt: Long = 0L,
     val lastPlayedAt: Long = 0L,
     val bvid: String? = null,
     val auid: Long? = null,
-    /** 上游作者/出版者 ID（UP 主 mid）。为 0 时不能跳作者主页 */
     val ownerMid: Long = 0L,
-    /** UP主头像 URL，播放页头部分辨"谁" */
     val ownerAvatar: String = ""
 )

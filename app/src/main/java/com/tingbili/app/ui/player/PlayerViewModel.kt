@@ -8,10 +8,12 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.media3.common.Player
 import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.data.local.SettingsStore
 import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.player.PartItem
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
+import com.tingbili.app.player.SleepTimer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +22,8 @@ import kotlinx.coroutines.launch
 class PlayerViewModel(
     private val holder: PlayerHolder,
     private val library: LibraryRepository,
-    private val launcher: PlayerLauncher
+    private val launcher: PlayerLauncher,
+    private val settings: SettingsStore
 ) : ViewModel() {
     data class UiState(
         val record: BookRecord? = null,
@@ -29,6 +32,7 @@ class PlayerViewModel(
         val durationMs: Long = 0L,
         val speed: Float = 1.0f,
         val sleepRemainSec: Int = -1,
+        val sleepEndOfTrack: Boolean = false,
         val queue: List<PartItem> = emptyList(),
         val queueIndex: Int = 0
     )
@@ -40,14 +44,25 @@ class PlayerViewModel(
     private var sleepTotalMs = 0L
     private var autoNextFired = false
 
+    private val sleepTimer = SleepTimer(
+        onFire = {
+            holder.pause()
+            sleepRemain = -1
+            _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = false)
+        },
+        isPlayingProvider = { holder.player.isPlaying }
+    )
+
     fun bind() {
         viewModelScope.launch {
             while (true) {
                 val p = holder.player
                 val ended = !p.isPlaying && p.playbackState == Player.STATE_ENDED
                 if (ended && !autoNextFired) {
-                    // 当前集自然播完 → 自动连播下一集（标志位防重复触发）
                     autoNextFired = true
+                    if (sleepTimer.isEndOfTrack()) {
+                        sleepTimer.stop()
+                    }
                     launcher.nextPart()
                 } else if (!ended) {
                     autoNextFired = false
@@ -59,6 +74,7 @@ class PlayerViewModel(
                     durationMs = p.duration.coerceAtLeast(0L),
                     speed = p.playbackParameters.speed,
                     sleepRemainSec = sleepRemain,
+                    sleepEndOfTrack = sleepTimer.isEndOfTrack(),
                     queue = holder.currentQueue(),
                     queueIndex = holder.currentQueueIndex()
                 )
@@ -68,7 +84,10 @@ class PlayerViewModel(
     }
 
     fun toggle() { holder.togglePlay() }
-    fun setSpeed(v: Float) { holder.setSpeed(v) }
+    fun setSpeed(v: Float) {
+        holder.setSpeed(v)
+        viewModelScope.launch { settings.setPlaybackSpeed(v) }
+    }
     fun seekTo(ms: Long) { holder.seekTo(ms) }
 
     fun nextPart() = viewModelScope.launch { launcher.nextPart() }
@@ -78,18 +97,20 @@ class PlayerViewModel(
     fun startSleep(minutes: Int) {
         sleepTotalMs = minutes * 60_000L
         sleepRemain = minutes * 60
-        viewModelScope.launch {
-            val start = System.currentTimeMillis()
-            while (System.currentTimeMillis() - start < sleepTotalMs) {
-                delay(1000)
-                sleepRemain = ((sleepTotalMs - (System.currentTimeMillis() - start)) / 1000).toInt()
-            }
-            holder.pause()
-            sleepRemain = -1
-        }
+        sleepTimer.start(minutes)
     }
 
-    fun stopSleep() { sleepRemain = -1 }
+    fun startSleepEndOfTrack() {
+        sleepTimer.startEndOfTrack()
+        sleepRemain = -1
+        _state.value = _state.value.copy(sleepEndOfTrack = true)
+    }
+
+    fun stopSleep() {
+        sleepTimer.stop()
+        sleepRemain = -1
+        _state.value = _state.value.copy(sleepEndOfTrack = false)
+    }
 
     fun saveProgress() {
         val r = holder.record.value ?: return
@@ -97,7 +118,8 @@ class PlayerViewModel(
             library.recordPlayed(
                 r.copy(
                     progressMs = holder.player.currentPosition,
-                    durationMs = holder.player.duration.coerceAtLeast(0L)
+                    durationMs = holder.player.duration.coerceAtLeast(0L),
+                    speed = holder.player.playbackParameters.speed
                 )
             )
         }
@@ -106,10 +128,14 @@ class PlayerViewModel(
     fun toggleFavorite() {
         val r = holder.record.value ?: return
         val newFav = !r.isFavorite
-        // 本地立即同步，保证 UI 立刻反馈（bind 轮询会从 holder.record 重建 state）
         holder.updateRecord(r.copy(isFavorite = newFav))
         _state.value = _state.value.copy(record = r.copy(isFavorite = newFav))
         viewModelScope.launch { library.toggleFavorite(r.id, newFav) }
+    }
+
+    override fun onCleared() {
+        sleepTimer.stop()
+        super.onCleared()
     }
 
     companion object {
@@ -119,7 +145,8 @@ class PlayerViewModel(
                 PlayerViewModel(
                     app.container.playerHolder,
                     app.container.libraryRepo,
-                    PlayerLauncher(app.container.playerHolder, app.container.playRepo, app.container.libraryRepo)
+                    PlayerLauncher(app.container.playerHolder, app.container.playRepo, app.container.libraryRepo),
+                    app.settingsStore
                 )
             }
         }

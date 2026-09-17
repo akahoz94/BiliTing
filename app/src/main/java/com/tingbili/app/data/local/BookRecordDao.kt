@@ -26,6 +26,12 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("UPDATE book_records SET isFavorite = :fav, favoriteAt = :ts WHERE id = :id")
     override suspend fun setFavorite(id: String, fav: Boolean, ts: Long)
 
+    @Query("SELECT * FROM book_records")
+    override suspend fun all(): List<BookRecord>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    override suspend fun replaceAll(records: List<BookRecord>)
+
     @Query("DELETE FROM book_records WHERE id = :id")
     suspend fun delete(id: String)
 

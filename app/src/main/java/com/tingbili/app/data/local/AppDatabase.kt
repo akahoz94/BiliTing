@@ -19,7 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext, AppDatabase::class.java, "bili_ting.db"
                 )
                     // 先 migrations 升级；万一迁移异常时直接重建（会丢本地历史/收藏，先保证能打开）。
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }
@@ -43,6 +43,13 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book_records ADD COLUMN ownerAvatar TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v4 → v5：增加 speed（每条记录上次播放倍速，resume 时恢复） */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_records ADD COLUMN speed REAL NOT NULL DEFAULT 1.0")
             }
         }
     }

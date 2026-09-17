@@ -77,7 +77,7 @@ class PlayerLauncher(
                 currentPart = idx + 1,
                 totalParts = queue.size
             )
-            holder.play(r, url, queue, positionMs, 1.0f)
+            holder.play(r, url, queue, positionMs, existing.speed.coerceAtLeast(0.5f))
             holder.moveQueueTo(idx)
             library.recordPlayed(r)
         }

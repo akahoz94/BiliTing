@@ -37,6 +37,7 @@ import com.tingbili.app.ui.player.PlayerScreen
 import com.tingbili.app.ui.search.SearchScreen
 import com.tingbili.app.ui.settings.SettingsScreen
 import com.tingbili.app.ui.shelf.ShelfScreen
+import com.tingbili.app.ui.stats.StatsScreen
 import kotlinx.coroutines.launch
 
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
@@ -133,7 +134,12 @@ fun BiliNavHost() {
                     modifier = Modifier.padding(padding)
                 )
             }
-            composable(Tab.Settings.route) { SettingsScreen(modifier = Modifier.padding(padding)) }
+            composable(Tab.Settings.route) {
+                SettingsScreen(
+                    onOpenStats = { navController.navigate("stats") },
+                    modifier = Modifier.padding(padding)
+                )
+            }
 
             composable("player") {
                 PlayerScreen(
@@ -153,6 +159,9 @@ fun BiliNavHost() {
                     onOpenPlayer = ::playAndNavigate,
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+            composable("stats") {
+                StatsScreen(modifier = Modifier.padding(padding))
             }
         }
     }

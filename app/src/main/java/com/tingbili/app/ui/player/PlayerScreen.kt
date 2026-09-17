@@ -382,7 +382,19 @@ fun PlayerScreen(
                             Text("$min 分钟", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                         }
                     }
-                    if (s.sleepRemainSec > 0) {
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(
+                        onClick = { viewModel.startSleepEndOfTrack(); showSleep = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "听完本集停止",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (s.sleepRemainSec > 0 || s.sleepEndOfTrack) {
                         TextButton(
                             onClick = { viewModel.stopSleep(); showSleep = false },
                             modifier = Modifier.fillMaxWidth()

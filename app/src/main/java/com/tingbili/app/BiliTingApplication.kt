@@ -34,7 +34,7 @@ class BiliTingApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashHandler()
-        Log.i(TAG_BANNER, "=== BiliTing v0.5-debug (crash handler installed) ===")
+        Log.i(TAG_BANNER, "=== BiliTing v0.7.0-debug (crash handler installed) ===")
         appDatabase = AppDatabase.get(this)
         settingsStore = SettingsStore(this)
         cookieStore = CookieStore(this)
@@ -53,7 +53,7 @@ class BiliTingApplication : Application() {
             throwable.printStackTrace(PrintWriter(sw))
             val body = buildString {
                 appendLine("=== BiliTing crash @ ${System.currentTimeMillis()} ===")
-                appendLine("thread=${thread.name} build=v0.5-debug")
+                appendLine("thread=${thread.name} build=v0.7.0-debug")
                 appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
                 appendLine(sw.toString())
             }

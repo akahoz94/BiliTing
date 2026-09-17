@@ -43,7 +43,7 @@ import com.tingbili.app.data.repo.SearchRepository
 import com.tingbili.app.util.CoverUtil
 import com.tingbili.app.util.FormatUtil
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
     onOpenPlayer: (SearchItem) -> Unit = {},
@@ -63,6 +63,34 @@ fun SearchScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { viewModel.search(1) })
             )
+            // 搜索历史（最近 10 条 + 关键词补全下拉）
+            if (s.history.isNotEmpty() && s.results.isEmpty() && !s.loading) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "最近搜索",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = viewModel::clearHistory) { Text("清空") }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    // 关键词补全 chip 流：点 chip 直接灌入并搜索
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
+                    ) {
+                        s.history.forEach { kw ->
+                            androidx.compose.material3.AssistChip(
+                                onClick = { viewModel.applyHistory(kw) },
+                                label = { Text(kw) }
+                            )
+                        }
+                    }
+                }
+            }
             Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 listOf("video" to "视频", "audio" to "音频", "all" to "全部").forEach { (type, label) ->
                     FilterChip(

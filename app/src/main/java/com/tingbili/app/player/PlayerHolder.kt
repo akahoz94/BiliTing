@@ -1,22 +1,22 @@
 package com.tingbili.app.player
 
 import android.content.Context
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.tingbili.app.data.local.BookRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/**
- * 全局播放器持有者：ExoPlayer 实例 + 当前播放的 BookRecord + 播放队列。
- */
 class PlayerHolder(context: Context) {
     private val appContext = context.applicationContext
-    // B站媒体 CDN 校验 Referer/User-Agent，缺省头会返回 403
+
     private val dataSourceFactory = DefaultHttpDataSource.Factory()
         .setDefaultRequestProperties(
             mapOf(
@@ -24,8 +24,25 @@ class PlayerHolder(context: Context) {
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
         )
+
+    private val trackSelector = DefaultTrackSelector(appContext).apply {
+        // 默认开启"仅音频"渲染：忽略视频轨 → 省流量/电
+        parameters = buildUponParameters()
+            .setRendererDisabled(C.TRACK_TYPE_VIDEO, true)
+            .build()
+    }
+
     val player: ExoPlayer = ExoPlayer.Builder(appContext)
         .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+        .setTrackSelector(trackSelector)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                .build(),
+            /* handleAudioFocus = */ true
+        )
+        .setHandleAudioBecomingNoisy(true)
         .build()
 
     private val _record = MutableStateFlow<BookRecord?>(null)
@@ -33,6 +50,13 @@ class PlayerHolder(context: Context) {
 
     private var queue: List<PartItem> = emptyList()
     private var queueIndex = 0
+
+    /** 动态切换"仅音频 / 视频"渲染模式（用户从设置页控制） */
+    fun setAudioOnly(audioOnly: Boolean) {
+        trackSelector.parameters = trackSelector.buildUponParameters()
+            .setRendererDisabled(C.TRACK_TYPE_VIDEO, audioOnly)
+            .build()
+    }
 
     fun play(
         record: BookRecord,
@@ -61,18 +85,13 @@ class PlayerHolder(context: Context) {
         player.play()
     }
 
-    /** 当前播放队列 */
     fun currentQueue(): List<PartItem> = queue
-
-    /** 当前队列下标（0 起） */
     fun currentQueueIndex(): Int = queueIndex
 
-    /** 切换队列下标（越界时钳制到边界） */
     fun moveQueueTo(index: Int) {
         queueIndex = index.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
     }
 
-    /** 更新当前播放记录（如收藏状态），供 UI 立即反馈 */
     fun updateRecord(record: BookRecord) { _record.value = record }
 
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()
