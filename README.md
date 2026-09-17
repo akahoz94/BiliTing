@@ -2,8 +2,6 @@
 
 B 站听书 Android 客户端。
 
-[📦 下载 APK](../../releases/latest)
-
 ## 截图
 
 | 书架 | 历史 | 搜索 | 播放页 |
