@@ -6,9 +6,9 @@ B 站听书 Android 客户端。
 
 ## 截图
 
-| 搜索 | 播放 | UP 主主页 | 书架 |
+| 书架 | 历史 | 搜索 | 播放页 |
 | :---: | :---: | :---: | :---: |
-| ![搜索](docs/screenshots/search.png) | ![播放](docs/screenshots/player.png) | ![UP主主页](docs/screenshots/author.png) | ![书架](docs/screenshots/shelf.png) |
+| ![书架](docs/screenshots/shelf.jpg) | ![历史](docs/screenshots/history.jpg) | ![搜索](docs/screenshots/search.jpg) | ![播放页](docs/screenshots/player.jpg) |
 
 ## 功能
 
