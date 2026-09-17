@@ -9,6 +9,7 @@ import com.tingbili.app.data.api.dto.WbiNav
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.GET
@@ -27,8 +28,7 @@ interface BiliApiService {
         @Query("page") page: Int,
         @Query("page_size") pageSize: Int,
         @Query("w_rid") wRid: String,
-        @Query("wts") wts: String,
-        @Query("order") order: String = "totalrank"
+        @Query("wts") wts: String
     ): BiliResponse<SearchResult>
 
     @GET("x/player/wbi/playurl")
@@ -70,6 +70,10 @@ fun buildHttpClient(cookieHeader: String): OkHttpClient =
                 .build()
             chain.proceed(req)
         }
+        .addInterceptor(
+            HttpLoggingInterceptor { msg -> android.util.Log.d("BiliApi", msg) }
+                .setLevel(HttpLoggingInterceptor.Level.BODY)
+        )
         .build()
 
 fun buildRetrofit(client: OkHttpClient): Retrofit =

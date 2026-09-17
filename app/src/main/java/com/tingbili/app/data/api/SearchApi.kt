@@ -18,15 +18,21 @@ class SearchApi(
 
     private suspend fun searchOnce(keyword: String, searchType: String, page: Int): List<SearchItem> {
         val (imgKey, subKey) = keys.keys()
+        // /type 端点只支持特定的 search_type，UI 选项需要映射
+        val apiSearchType = when (searchType) {
+            "all" -> "video"      // "全部" → 视频（最全面，包含音视频）
+            "audio" -> "music"    // "音频" → 音乐（包含音频内容）
+            else -> searchType    // "video" 等直接传递
+        }
         val params = mapOf(
             "keyword" to keyword,
-            "search_type" to searchType,
+            "search_type" to apiSearchType,
             "page" to page.toString(),
             "page_size" to "30"
         )
         val signed = WbiSigner.sign(params, imgKey, subKey)
         val resp = service.search(
-            keyword = keyword, searchType = searchType, page = page, pageSize = 30,
+            keyword = keyword, searchType = apiSearchType, page = page, pageSize = 30,
             wRid = signed.getValue("w_rid"), wts = signed.getValue("wts")
         )
         return resp.data?.result ?: emptyList()
