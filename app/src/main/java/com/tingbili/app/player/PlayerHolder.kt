@@ -31,13 +31,13 @@ class PlayerHolder(context: Context) {
     private val _record = MutableStateFlow<BookRecord?>(null)
     val record: StateFlow<BookRecord?> = _record
 
-    private var queue: List<Pair<String, Long>> = emptyList() // (bvid, cid) 或 (auid, 0)
+    private var queue: List<PartItem> = emptyList()
     private var queueIndex = 0
 
     fun play(
         record: BookRecord,
         audioUrl: String,
-        queue: List<Pair<String, Long>>,
+        queue: List<PartItem>,
         positionMs: Long,
         speed: Float
     ) {
@@ -61,8 +61,8 @@ class PlayerHolder(context: Context) {
         player.play()
     }
 
-    /** 当前播放队列（(bvid, cid) 列表） */
-    fun currentQueue(): List<Pair<String, Long>> = queue
+    /** 当前播放队列 */
+    fun currentQueue(): List<PartItem> = queue
 
     /** 当前队列下标（0 起） */
     fun currentQueueIndex(): Int = queueIndex

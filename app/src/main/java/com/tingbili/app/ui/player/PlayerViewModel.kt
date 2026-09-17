@@ -9,6 +9,7 @@ import androidx.media3.common.Player
 import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.data.repo.LibraryRepository
+import com.tingbili.app.player.PartItem
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
 import kotlinx.coroutines.delay
@@ -27,7 +28,9 @@ class PlayerViewModel(
         val positionMs: Long = 0L,
         val durationMs: Long = 0L,
         val speed: Float = 1.0f,
-        val sleepRemainSec: Int = -1
+        val sleepRemainSec: Int = -1,
+        val queue: List<PartItem> = emptyList(),
+        val queueIndex: Int = 0
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -55,7 +58,9 @@ class PlayerViewModel(
                     positionMs = p.currentPosition,
                     durationMs = p.duration.coerceAtLeast(0L),
                     speed = p.playbackParameters.speed,
-                    sleepRemainSec = sleepRemain
+                    sleepRemainSec = sleepRemain,
+                    queue = holder.currentQueue(),
+                    queueIndex = holder.currentQueueIndex()
                 )
                 delay(500)
             }
@@ -68,6 +73,7 @@ class PlayerViewModel(
 
     fun nextPart() = viewModelScope.launch { launcher.nextPart() }
     fun prevPart() = viewModelScope.launch { launcher.prevPart() }
+    fun jumpToPart(index: Int) = viewModelScope.launch { launcher.jumpToPart(index) }
 
     fun startSleep(minutes: Int) {
         sleepTotalMs = minutes * 60_000L

@@ -9,6 +9,7 @@ data class BookRecord(
     val title: String,
     val owner: String,                   // UP主/作者
     val type: String,                    // "video" / "audio"
+    val cover: String = "",              // 封面图 URL
     val totalParts: Int = 0,             // 总集数（0=未知）
     val currentPart: Int = 1,            // 当前第几集
     val currentCid: Long? = null,        // 当前集 cid（video）

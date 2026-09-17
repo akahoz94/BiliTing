@@ -8,15 +8,17 @@ import com.tingbili.app.data.repo.SearchRepository
 
 /**
  * 播放拉起器：把任意入口（搜索/书架/历史）转成 ExoPlayer 播放，并写本地记录。
- * 队列元素 (bvid, cid)；音频记录队列为空。
+ * 队列元素使用 PartItem（含 part 名称与时长），音频记录队列为空。
  */
 class PlayerLauncher(
     private val holder: PlayerHolder,
     private val playRepo: PlayRepository,
     private val library: LibraryRepository
 ) {
-    /** 搜索结果点击播放：video 走 view→resolveVideo→第一P；audio 走音频区 */
+    /** 搜索结果点击播放：video 走 pagelist→resolveVideo→第一P；audio 走音频区 */
     suspend fun playSearchItem(item: SearchItem) {
+        // 封面：video 用 pic，audio 用 cover
+        val cover = if (item.cover.isNotBlank()) item.cover else item.pic
         if (item.type == "audio" || item.bvid.isBlank()) {
             val auid = item.aid
             if (auid <= 0L) return
@@ -26,6 +28,7 @@ class PlayerLauncher(
                 title = SearchRepository.stripHtml(item.title),
                 owner = item.author,
                 type = "audio",
+                cover = cover,
                 currentPart = 1,
                 auid = auid
             )
@@ -35,7 +38,8 @@ class PlayerLauncher(
             val (record, queue) = playRepo.resolveVideo(item.bvid) ?: return
             val r = record.copy(
                 title = record.title.ifBlank { SearchRepository.stripHtml(item.title) },
-                owner = record.owner.ifBlank { item.author }
+                owner = record.owner.ifBlank { item.author },
+                cover = cover.ifBlank { record.cover }
             )
             val url = playRepo.resolveAudioUrl(r.bvid, r.currentCid, null) ?: return
             holder.play(r, url, queue, 0L, 1.0f)
@@ -56,12 +60,13 @@ class PlayerLauncher(
             library.recordPlayed(r)
         } else {
             val bvid = existing.bvid!!
-            // 优先重建完整分P 队列；view 失败则退回单P
+            // 优先重建完整分P 队列；pagelist 失败则退回单P
             val queue = playRepo.resolveVideo(bvid)?.second
-                ?: listOf(bvid to (existing.currentCid ?: 0L)).filter { it.second > 0L }
-            val cid = existing.currentCid ?: queue.firstOrNull()?.second ?: return
+                ?: listOf(PartItem(bvid, existing.currentCid ?: 0L, "", 0L))
+                    .filter { it.cid > 0L }
+            val cid = existing.currentCid ?: queue.firstOrNull()?.cid ?: return
             val url = playRepo.resolveAudioUrl(bvid, cid, null) ?: return
-            val idx = queue.indexOfFirst { it.second == cid }.coerceAtLeast(0)
+            val idx = queue.indexOfFirst { it.cid == cid }.coerceAtLeast(0)
             val r = existing.copy(
                 progressMs = 0L,
                 currentCid = cid,
@@ -91,11 +96,18 @@ class PlayerLauncher(
         playQueueItem(queue, prev)
     }
 
-    private suspend fun playQueueItem(queue: List<Pair<String, Long>>, index: Int) {
-        val (bvid, cid) = queue[index]
-        val url = playRepo.resolveAudioUrl(bvid, cid, null) ?: return
+    /** 跳转到指定队列下标 */
+    suspend fun jumpToPart(index: Int) {
+        val queue = holder.currentQueue()
+        if (index !in queue.indices) return
+        playQueueItem(queue, index)
+    }
+
+    private suspend fun playQueueItem(queue: List<PartItem>, index: Int) {
+        val item = queue[index]
+        val url = playRepo.resolveAudioUrl(item.bvid, item.cid, null) ?: return
         val cur = holder.record.value ?: return
-        val r = cur.copy(currentCid = cid, currentPart = index + 1, progressMs = 0L)
+        val r = cur.copy(currentCid = item.cid, currentPart = index + 1, progressMs = 0L)
         holder.play(r, url, queue, 0L, 1.0f)
         holder.moveQueueTo(index)
         library.recordPlayed(r)

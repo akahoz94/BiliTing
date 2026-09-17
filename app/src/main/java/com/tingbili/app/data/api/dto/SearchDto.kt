@@ -19,6 +19,8 @@ data class SearchItem(
     @SerialName("duration") val durationStr: String = "",  // "mm:ss" 格式
     val length: Long = 0,              // 视频时长（秒，音频区）
     val play: Long = 0,                // 播放数（字符串可能带"万"）
-    val upic: String = "",
-    @SerialName("mid") val uid: Long = 0
+    val upic: String = "",             // UP主头像
+    @SerialName("mid") val uid: Long = 0,
+    val pic: String = "",              // 视频封面（type=video）
+    val cover: String = ""             // 音频封面（type=audio）
 )

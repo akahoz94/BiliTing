@@ -4,6 +4,7 @@ import com.tingbili.app.data.api.AudioApi
 import com.tingbili.app.data.api.BiliApiService
 import com.tingbili.app.data.api.PlayUrlApi
 import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.player.PartItem
 
 class PlayRepository(
     private val playUrlApi: PlayUrlApi,
@@ -19,10 +20,10 @@ class PlayRepository(
 
     /**
      * 视频分P 信息 → 播放记录 + 播放队列。
-     * record.id = "video:$bvid"，currentCid = 第一P cid，队列 pages.map { bvid to cid }。
-     * 标题/作者由调用方回填（搜索结果自带，续播记录已存）。失败返回 null。
+     * record.id = "video:$bvid"，currentCid = 第一P cid，队列为 PartItem（bvid, cid, part 名, duration）。
+     * 标题/作者/封面由调用方回填（搜索结果自带，续播记录已存）。失败返回 null。
      */
-    suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<Pair<String, Long>>>? {
+    suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<PartItem>>? {
         val pages = service.pagelist(bvid).data.orEmpty().filter { it.cid > 0 }
         if (pages.isEmpty()) return null
         val record = BookRecord(
@@ -35,7 +36,7 @@ class PlayRepository(
             currentCid = pages.first().cid,
             bvid = bvid
         )
-        val queue = pages.map { bvid to it.cid }
+        val queue = pages.map { PartItem(bvid, it.cid, it.part, it.duration) }
         return record to queue
     }
 }
