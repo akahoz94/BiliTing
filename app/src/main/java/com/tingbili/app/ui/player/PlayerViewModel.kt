@@ -145,7 +145,12 @@ class PlayerViewModel(
                 PlayerViewModel(
                     app.container.playerHolder,
                     app.container.libraryRepo,
-                    PlayerLauncher(app.container.playerHolder, app.container.playRepo, app.container.libraryRepo),
+                    PlayerLauncher(
+                        app.container.playerHolder,
+                        app.container.playRepo,
+                        app.container.libraryRepo,
+                        app.container.biliService
+                    ),
                     app.settingsStore
                 )
             }

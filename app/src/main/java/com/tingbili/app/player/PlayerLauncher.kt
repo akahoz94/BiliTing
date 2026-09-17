@@ -1,10 +1,14 @@
 package com.tingbili.app.player
 
+import android.util.Log
+import com.tingbili.app.data.api.BiliApiService
 import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.data.repo.PlayRepository
 import com.tingbili.app.data.repo.SearchRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 播放拉起器：把任意入口（搜索/书架/历史）转成 ExoPlayer 播放，并写本地记录。
@@ -13,7 +17,8 @@ import com.tingbili.app.data.repo.SearchRepository
 class PlayerLauncher(
     private val holder: PlayerHolder,
     private val playRepo: PlayRepository,
-    private val library: LibraryRepository
+    private val library: LibraryRepository,
+    private val biliService: BiliApiService
 ) {
     /** 搜索结果点击播放：video 走 pagelist→resolveVideo→第一P；audio 走音频区 */
     suspend fun playSearchItem(item: SearchItem) {
@@ -45,9 +50,11 @@ class PlayerLauncher(
                 ownerMid = item.uid,
                 ownerAvatar = item.upic.ifBlank { record.ownerAvatar }
             )
-            val url = playRepo.resolveAudioUrl(r.bvid, r.currentCid, null) ?: return
-            holder.play(r, url, queue, 0L, 1.0f)
-            library.recordPlayed(r)
+            // 兜底：搜索结果没带 mid 时（如 websearch 端），用 view 接口反查
+            val rWithAuthor = if (r.ownerMid <= 0L) enrichAuthor(r) else r
+            val url = playRepo.resolveAudioUrl(rWithAuthor.bvid, rWithAuthor.currentCid, null) ?: return
+            holder.play(rWithAuthor, url, queue, 0L, 1.0f)
+            library.recordPlayed(rWithAuthor)
         }
     }
 
@@ -71,15 +78,40 @@ class PlayerLauncher(
             val cid = existing.currentCid ?: queue.firstOrNull()?.cid ?: return
             val url = playRepo.resolveAudioUrl(bvid, cid, null) ?: return
             val idx = queue.indexOfFirst { it.cid == cid }.coerceAtLeast(0)
-            val r = existing.copy(
+            // 兜底：早期记录可能没存 ownerMid，调 view 接口补全后再播放
+            val base = existing.copy(
                 progressMs = 0L,
                 currentCid = cid,
                 currentPart = idx + 1,
                 totalParts = queue.size
             )
+            val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
             holder.play(r, url, queue, positionMs, existing.speed.coerceAtLeast(0.5f))
             holder.moveQueueTo(idx)
             library.recordPlayed(r)
+        }
+    }
+
+    /**
+     * 用 bvid 调 /x/web-interface/view 反查 up 主 mid/upic/name；
+     * 失败时原样返回。view 接口比 view 用 wbi 端风控宽松，多数情况可用。
+     */
+    private suspend fun enrichAuthor(r: BookRecord): BookRecord = withContext(Dispatchers.IO) {
+        val bvid = r.bvid ?: return@withContext r
+        try {
+            val resp = biliService.view(bvid)
+            val o = resp.data?.owner
+            if (o != null && o.mid > 0L) {
+                Log.i("PlayerLauncher", "view 兜底反查 UP：${o.name} mid=${o.mid}")
+                r.copy(
+                    owner = o.name.ifBlank { r.owner },
+                    ownerMid = o.mid,
+                    ownerAvatar = o.face.ifBlank { r.ownerAvatar }
+                )
+            } else r
+        } catch (t: Throwable) {
+            Log.w("PlayerLauncher", "view 兜底失败：${t.message}")
+            r
         }
     }
 

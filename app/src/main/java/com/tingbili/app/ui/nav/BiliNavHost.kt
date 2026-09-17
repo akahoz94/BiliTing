@@ -58,7 +58,7 @@ fun BiliNavHost() {
     val container = (context.applicationContext as BiliTingApplication).container
     val scope = rememberCoroutineScope()
     val launcher = remember {
-        PlayerLauncher(container.playerHolder, container.playRepo, container.libraryRepo)
+        PlayerLauncher(container.playerHolder, container.playRepo, container.libraryRepo, container.biliService)
     }
 
     // 是否为 tab 主页面（显示底部栏；播放页/作者页为全屏，不显示底部栏也不显示迷你条）

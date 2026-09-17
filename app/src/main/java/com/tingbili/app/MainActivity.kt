@@ -37,12 +37,13 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             val themeMode by settings.themeMode.collectAsState(initial = savedTheme)
+            val themeColor by settings.themeColor.collectAsState(initial = 0)
             val darkTheme = when (themeMode) {
                 1 -> false
                 2 -> true
                 else -> isSystemInDarkTheme()
             }
-            BiliTingTheme(darkTheme = darkTheme) { BiliNavHost() }
+            BiliTingTheme(darkTheme = darkTheme, themeColor = themeColor) { BiliNavHost() }
         }
     }
 }

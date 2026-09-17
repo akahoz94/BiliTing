@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,14 +62,14 @@ import com.tingbili.app.util.CoverUtil
 import com.tingbili.app.util.FormatUtil
 
 /**
- * 播放页布局（借鉴成熟听书 App：
+ * 播放页（主题色沉浸 + 完整换肤）。
+ *
+ * 布局借鉴喜马拉雅 / 小宇宙 等成熟听书 App：
  *   顶栏返回 + 收藏 →
  *   中央大封面 →
  *   标题/副标题紧贴封面下沿 →
  *   进度条 + 当前/总时长 →
- *   大播放按钮 + 倍速/定时/选集 横排）
- *
- * 注：书签（TimelineMarks）已移除。
+ *   大播放按钮 + 倍速/定时/选集 横排
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -90,6 +89,23 @@ fun PlayerScreen(
         return
     }
 
+    // 沉浸式背景：0=主题色渐变（默认） 1=极简底色（与主界面 background 同色）
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val settingsStore = (context.applicationContext as com.tingbili.app.BiliTingApplication).settingsStore
+    val immersiveMode by settingsStore.immersiveMode.collectAsState(initial = 0)
+    val brush = if (immersiveMode == 1) {
+        Brush.verticalGradient(
+            listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                MaterialTheme.colorScheme.background
+            )
+        )
+    }
+
     var showSpeed by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showParts by remember { mutableStateOf(false) }
@@ -100,18 +116,9 @@ fun PlayerScreen(
         Modifier
             .fillMaxSize()
             .navigationBarsPadding()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                        MaterialTheme.colorScheme.background
-                    )
-                )
-            )
+            .background(brush)
     ) {
-        Column(
-            Modifier.fillMaxSize(),
-        ) {
+        Column(Modifier.fillMaxSize()) {
             // ===== 顶部：返回 + 收藏 =====
             Row(
                 Modifier
@@ -176,35 +183,19 @@ fun PlayerScreen(
                                     )
                                 )
                         ) {
-                            Column(
-                                Modifier.fillMaxSize().padding(20.dp),
-                                verticalArrangement = Arrangement.Center,
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    record.title.ifBlank { "听书" },
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White.copy(alpha = 0.95f),
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = Color.White.copy(alpha = 0.22f)
-                                ) {
-                                    Text(
-                                        if (record.totalParts > 0) "第 ${record.currentPart} 集 / ${record.totalParts}"
-                                        else "有声书",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                                    )
-                                }
-                            }
+                            Text(
+                                record.title.ifBlank { "听书" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White.copy(alpha = 0.95f),
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(20.dp)
+                                    .wrapContentHeight(Alignment.CenterVertically)
+                            )
                         }
                     }
                 }
@@ -245,8 +236,11 @@ fun PlayerScreen(
                         )
                     }
                     if (totalTxt != null) {
-                        if (ownerTxt.isNotBlank()) Text(" · ", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (ownerTxt.isNotBlank()) Text(
+                            " · ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Text(
                             totalTxt,
                             style = MaterialTheme.typography.bodySmall,

@@ -37,6 +37,7 @@ class SettingsStore(private val context: Context) {
     private val keyWebdavUrl = stringPreferencesKey("webdav_url")
     private val keyWebdavUser = stringPreferencesKey("webdav_user")
     private val keyWebdavPass = stringPreferencesKey("webdav_pass")
+    private val keyImmersiveMode = intPreferencesKey("immersive_mode")
     /** 最近搜索词（最多 10 条；每条一行） */
     private val keySearchHistory = stringPreferencesKey("search_history")
 
@@ -54,6 +55,8 @@ class SettingsStore(private val context: Context) {
         val raw = it[keySearchHistory] ?: ""
         if (raw.isBlank()) emptyList() else raw.split("\n").filter { x -> x.isNotBlank() }
     }
+    /** 沉浸式背景：0=主题色沉浸（默认） 1=极简底色 */
+    val immersiveMode: Flow<Int> = dataStore.data.map { it[keyImmersiveMode] ?: 0 }
 
     suspend fun setPlaybackSpeed(v: Float) = dataStore.edit { it[keyPlaybackSpeed] = v }
     suspend fun setSleepMinutes(v: Int) = dataStore.edit { it[keySleepMinutes] = v }
@@ -65,6 +68,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setWebdavUrl(v: String) = dataStore.edit { it[keyWebdavUrl] = v }
     suspend fun setWebdavUser(v: String) = dataStore.edit { it[keyWebdavUser] = v }
     suspend fun setWebdavPass(v: String) = dataStore.edit { it[keyWebdavPass] = v }
+    suspend fun setImmersiveMode(v: Int) = dataStore.edit { it[keyImmersiveMode] = v }
 
     suspend fun pushSearchHistory(keyword: String, max: Int = 10) {
         val k = keyword.trim()

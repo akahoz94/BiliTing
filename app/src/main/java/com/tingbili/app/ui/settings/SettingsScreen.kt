@@ -72,6 +72,7 @@ fun SettingsScreen(
     val sleepEnd by viewModel.sleepEndOfTrack.collectAsState()
     val webdavUrl by viewModel.webdavUrl.collectAsState()
     val webdavUser by viewModel.webdavUser.collectAsState()
+    val immersiveMode by viewModel.immersiveMode.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val msg by viewModel.msg.collectAsState()
 
@@ -98,6 +99,17 @@ fun SettingsScreen(
             item {
                 SectionLabel("主题色")
                 ColorSwatches(selected = themeColor, onSelect = viewModel::setThemeColor)
+                Spacer(Modifier.height(20.dp))
+            }
+
+            // 播放页沉浸式
+            item {
+                SectionLabel("播放页沉浸式")
+                SegmentedRow(
+                    options = listOf(0 to "主题色", 1 to "极简"),
+                    selected = immersiveMode,
+                    onSelect = viewModel::setImmersiveMode
+                )
                 Spacer(Modifier.height(20.dp))
             }
 
@@ -322,23 +334,24 @@ private fun WebDavDialog(
 
 @Composable
 private fun ColorSwatches(selected: Int, onSelect: (Int) -> Unit) {
-    val purple = Defaults.COLOR_PURPLE to ThemePalettes.Purple
-    val blue = Defaults.COLOR_BLUE to ThemePalettes.Blue
-    val green = Defaults.COLOR_GREEN to ThemePalettes.Green
-    val orange = Defaults.COLOR_ORANGE to ThemePalettes.Orange
-    val pink = Defaults.COLOR_PINK to ThemePalettes.Pink
-    val red = Defaults.COLOR_RED to ThemePalettes.Red
+    val purple = Defaults.COLOR_PURPLE to "紫"
+    val blue = Defaults.COLOR_BLUE to "蓝"
+    val green = Defaults.COLOR_GREEN to "绿"
+    val orange = Defaults.COLOR_ORANGE to "橙"
+    val pink = Defaults.COLOR_PINK to "粉"
+    val red = Defaults.COLOR_RED to "红"
     val swatches = listOf(purple, blue, green, orange, pink, red)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         swatches.forEach { entry ->
             val id: Int = entry.first
-            val color: Color = entry.second
+            // 直接从 ColorScheme 取 primary 色样，避免硬编码长 Color hex
+            val previewColor = ThemePalettes.schemeOf(id, false).primary
             val isOn = id == selected
             Box(
                 Modifier
                     .size(if (isOn) 52.dp else 40.dp)
                     .clip(CircleShape)
-                    .background(color)
+                    .background(previewColor)
                     .border(
                         width = if (isOn) 3.dp else 1.dp,
                         color = if (isOn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,

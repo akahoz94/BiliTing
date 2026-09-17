@@ -34,8 +34,19 @@ class BiliTingApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashHandler()
-        Log.i(TAG_BANNER, "=== BiliTing v0.7.0-debug (crash handler installed) ===")
-        appDatabase = AppDatabase.get(this)
+        Log.i(TAG_BANNER, "=== BiliTing v0.8.0-debug (crash handler installed) ===")
+        try {
+            appDatabase = AppDatabase.get(this)
+            Log.i(TAG_BANNER, "AppDatabase open ok: version=${appDatabase.openHelper.readableDatabase.version}")
+        } catch (t: Throwable) {
+            Log.e(TAG_BANNER, "AppDatabase init failed, falling back to destructive rebuild", t)
+            // schema 与 migration 双重失败 → 强制删 db 后重建，保留用户可打开
+            runCatching {
+                deleteDatabase("bili_ting.db")
+            }
+            appDatabase = AppDatabase.get(this)
+            Log.w(TAG_BANNER, "AppDatabase rebuilt (local data wiped)")
+        }
         settingsStore = SettingsStore(this)
         cookieStore = CookieStore(this)
         playerHolder = PlayerHolder(this)
@@ -53,7 +64,7 @@ class BiliTingApplication : Application() {
             throwable.printStackTrace(PrintWriter(sw))
             val body = buildString {
                 appendLine("=== BiliTing crash @ ${System.currentTimeMillis()} ===")
-                appendLine("thread=${thread.name} build=v0.7.0-debug")
+                appendLine("thread=${thread.name} build=v0.8.0-debug")
                 appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
                 appendLine(sw.toString())
             }
@@ -76,7 +87,7 @@ class BiliTingApplication : Application() {
  * 避免引入 DI 框架。API/仓库实例全局唯一，跨屏幕共享。
  */
 class AppContainer(val app: BiliTingApplication) {
-    private val service: BiliApiService = run {
+    val biliService: BiliApiService = run {
         // B站风控要求匿名请求携带 buvid3：启动时读一次，没有则生成并持久化
         val buvid3 = runBlocking {
             var v = app.cookieStore.buvid3()
@@ -89,12 +100,12 @@ class AppContainer(val app: BiliTingApplication) {
         val cookie = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
         buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
     }
-    private val wbiKeys = WbiKeyStore(service)
+    private val wbiKeys = WbiKeyStore(biliService)
 
-    val searchApi = SearchApi(service, wbiKeys)
+    val searchApi = SearchApi(biliService, wbiKeys)
     val searchRepo = SearchRepository(searchApi)
-    val authorApi = AuthorApi(service, wbiKeys)
-    val playRepo = PlayRepository(PlayUrlApi(service, wbiKeys), AudioApi(service), service)
+    val authorApi = AuthorApi(biliService, wbiKeys)
+    val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService)
 
     val dao: BookRecordDao = app.appDatabase.bookRecordDao()
     val libraryRepo = LibraryRepository(dao)

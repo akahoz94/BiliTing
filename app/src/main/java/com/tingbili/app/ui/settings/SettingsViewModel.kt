@@ -28,6 +28,7 @@ class SettingsViewModel(
     val sleepEndOfTrack: StateFlow<Boolean> = store.sleepEndOfTrack.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val webdavUrl: StateFlow<String> = store.webdavUrl.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val webdavUser: StateFlow<String> = store.webdavUser.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val immersiveMode: StateFlow<Int> = store.immersiveMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -53,6 +54,7 @@ class SettingsViewModel(
     fun setWebdavUrl(v: String) = viewModelScope.launch { store.setWebdavUrl(v) }
     fun setWebdavUser(v: String) = viewModelScope.launch { store.setWebdavUser(v) }
     fun setWebdavPass(v: String) = viewModelScope.launch { store.setWebdavPass(v) }
+    fun setImmersiveMode(v: Int) = viewModelScope.launch { store.setImmersiveMode(v) }
 
     /** WebDAV 备份到云端；返回结果会推到 msg 中 */
     fun webdavBackup(pass: String) {
