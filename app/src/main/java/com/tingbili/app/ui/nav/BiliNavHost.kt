@@ -107,7 +107,7 @@ fun BiliNavHost() {
     fun favoriteSearchItem(item: SearchItem) {
         scope.launch {
             val cover = if (item.cover.isNotBlank()) item.cover else item.pic
-            val id = if (item.type == "audio" || item.bvid.isBlank()) "audio:" else "video:"
+            val id = if (item.type == "audio" || item.bvid.isBlank()) "audio:${item.aid}" else "video:${item.bvid}"
             val record = BookRecord(
                 id = id,
                 title = com.tingbili.app.data.repo.SearchRepository.stripHtml(item.title),
@@ -128,9 +128,10 @@ fun BiliNavHost() {
 
     fun openAuthor(mid: Long, name: String, avatar: String) {
         // 名字/头像含 / : ? 等特殊字符，必须 URL 编码后再塞进路径路由
-        navController.navigate("author/$mid/${Uri.encode(name)}/${Uri.encode(avatar)}")
-    }
+        val safeAvatar = avatar.ifBlank { "none" }
+        navController.navigate("author/$mid/${Uri.encode(name)}/${Uri.encode(safeAvatar)}")
 
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {

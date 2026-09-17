@@ -14,8 +14,8 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 27
-        versionName = "0.17.0"
+        versionCode = 28
+        versionName = "0.17.1"
     }
 
     // debug keystore：保证 release 也用同一份密钥，方便侧载且升级时签名一致

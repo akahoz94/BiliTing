@@ -179,13 +179,11 @@ class DownloadManager(
         bookTitle: String, cover: String,
         recordId: String, bvid: String?, cid: Long?, auid: Long?, partTitle: String
     ): Boolean {
-        val cookieHeader = cookieHeader()
         return try {
+            // 不手动设置 Referer/UA/Cookie：client 已带全局拦截器统一加登录态，
+            // 手动覆盖会把 SESSDATA 冲成临时 buvid3 导致 CDN 403。只补 Range。
             val req = Request.Builder().url(url)
-                .header("Referer", "https://www.bilibili.com/")
-                .header("User-Agent", UA)
-                .header("Cookie", cookieHeader)
-                .header("Range", "bytes=0-")  // CDN 返回 206，便于流式下载与失败重试
+                .header("Range", "bytes=0-")
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
