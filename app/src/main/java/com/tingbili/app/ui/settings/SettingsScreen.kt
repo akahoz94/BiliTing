@@ -47,13 +47,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)) {
+fun SettingsScreen(modifier: Modifier = Modifier, viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)) {
     val theme by viewModel.themeMode.collectAsState()
     val keywords by viewModel.keywords.collectAsState()
     val speed by viewModel.speed.collectAsState()
     var newKw by remember { mutableStateOf("") }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("设置") }) }) { padding ->
+    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("设置") }) }) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)

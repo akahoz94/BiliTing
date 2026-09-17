@@ -19,5 +19,9 @@ data class BookRecord(
     val favoriteAt: Long = 0L,
     val lastPlayedAt: Long = 0L,
     val bvid: String? = null,
-    val auid: Long? = null
+    val auid: Long? = null,
+    /** 上游作者/出版者 ID（UP 主 mid）。为 0 时不能跳作者主页 */
+    val ownerMid: Long = 0L,
+    /** UP主头像 URL，播放页头部分辨"谁" */
+    val ownerAvatar: String = ""
 )

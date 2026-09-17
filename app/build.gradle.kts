@@ -14,8 +14,23 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 6
+        versionName = "0.6.0"
+    }
+
+    // debug keystore：保证 release 也用同一份密钥，方便侧载且升级时签名一致
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            // 启用 v1+v2+v3+v4 全套签名方案：避免部分定制 ROM 只认 v3/v4 时报"未知来源/权限"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
     }
 
     buildTypes {

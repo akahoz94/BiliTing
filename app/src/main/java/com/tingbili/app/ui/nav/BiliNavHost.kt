@@ -1,5 +1,9 @@
 package com.tingbili.app.ui.nav
 
+import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmarks
@@ -27,6 +31,7 @@ import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.player.PlayerLauncher
+import com.tingbili.app.ui.author.AuthorScreen
 import com.tingbili.app.ui.history.HistoryScreen
 import com.tingbili.app.ui.player.PlayerScreen
 import com.tingbili.app.ui.search.SearchScreen
@@ -55,6 +60,11 @@ fun BiliNavHost() {
         PlayerLauncher(container.playerHolder, container.playRepo, container.libraryRepo)
     }
 
+    // 是否为 tab 主页面（显示底部栏；播放页/作者页为全屏，不显示底部栏也不显示迷你条）
+    val isTab = Tab.entries.any { it.route == currentRoute }
+    // 隐藏系统底部导航的全屏页（播放页、作者主页）
+    val isFullscreen = currentRoute == "player" || currentRoute?.contains("author") == true
+
     fun playAndNavigate(item: SearchItem) {
         scope.launch { launcher.playSearchItem(item) }
         navController.navigate("player")
@@ -65,24 +75,35 @@ fun BiliNavHost() {
         navController.navigate("player")
     }
 
+    fun openAuthor(mid: Long, name: String, avatar: String) {
+        // 名字/头像含 / : ? 等特殊字符，必须 URL 编码后再塞进路径路由
+        navController.navigate("author/$mid/${Uri.encode(name)}/${Uri.encode(avatar)}")
+    }
+
     Scaffold(
         bottomBar = {
-            // 仅 4 个 tab 页面显示底部栏；全屏播放页 "player" 不显示
-            if (Tab.entries.any { it.route == currentRoute }) {
-                NavigationBar {
-                    Tab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = currentRoute == tab.route,
-                            onClick = {
-                                navController.navigate(tab.route) {
-                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) }
-                        )
+            if (isTab) {
+                Column {
+                    // 迷你播放条置于底部导航上方
+                    MiniPlayerBar(
+                        holder = container.playerHolder,
+                        onOpenPlayer = { navController.navigate("player") }
+                    )
+                    NavigationBar {
+                        Tab.entries.forEach { tab ->
+                            NavigationBarItem(
+                                selected = currentRoute == tab.route,
+                                onClick = {
+                                    navController.navigate(tab.route) {
+                                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                label = { Text(tab.label) }
+                            )
+                        }
                     }
                 }
             }
@@ -91,19 +112,48 @@ fun BiliNavHost() {
         NavHost(
             navController = navController,
             startDestination = Tab.Shelf.route,
-            modifier = Modifier.padding(padding)
+            modifier = Modifier.fillMaxSize()
         ) {
             composable(Tab.Shelf.route) {
-                ShelfScreen(onOpenPlayer = ::resumeAndNavigate)
+                ShelfScreen(
+                    onOpenPlayer = ::resumeAndNavigate,
+                    modifier = Modifier.padding(padding)
+                )
             }
             composable(Tab.Search.route) {
-                SearchScreen(onOpenPlayer = ::playAndNavigate)
+                SearchScreen(
+                    onOpenPlayer = ::playAndNavigate,
+                    onOpenAuthor = ::openAuthor,
+                    modifier = Modifier.padding(padding)
+                )
             }
             composable(Tab.History.route) {
-                HistoryScreen(onOpenPlayer = ::resumeAndNavigate)
+                HistoryScreen(
+                    onOpenPlayer = ::resumeAndNavigate,
+                    modifier = Modifier.padding(padding)
+                )
             }
-            composable(Tab.Settings.route) { SettingsScreen() }
-            composable("player") { PlayerScreen() }
+            composable(Tab.Settings.route) { SettingsScreen(modifier = Modifier.padding(padding)) }
+
+            composable("player") {
+                PlayerScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAuthor = { mid, name, avatar -> openAuthor(mid, name, avatar) }
+                )
+            }
+            composable("author/{mid}/{name}/{avatar}") { entry ->
+                val mid = entry.arguments?.getString("mid")?.toLongOrNull() ?: 0L
+                val name = entry.arguments?.getString("name").orEmpty()
+                val avatar = entry.arguments?.getString("avatar").orEmpty()
+                AuthorScreen(
+                    mid = mid,
+                    name = name,
+                    avatar = avatar,
+                    onBack = { navController.popBackStack() },
+                    onOpenPlayer = ::playAndNavigate,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

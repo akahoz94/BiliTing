@@ -30,7 +30,9 @@ class PlayerLauncher(
                 type = "audio",
                 cover = cover,
                 currentPart = 1,
-                auid = auid
+                auid = auid,
+                ownerMid = item.uid,
+                ownerAvatar = item.upic
             )
             holder.play(record, url, emptyList(), 0L, 1.0f)
             library.recordPlayed(record)
@@ -39,7 +41,9 @@ class PlayerLauncher(
             val r = record.copy(
                 title = record.title.ifBlank { SearchRepository.stripHtml(item.title) },
                 owner = record.owner.ifBlank { item.author },
-                cover = cover.ifBlank { record.cover }
+                cover = cover.ifBlank { record.cover },
+                ownerMid = item.uid,
+                ownerAvatar = item.upic.ifBlank { record.ownerAvatar }
             )
             val url = playRepo.resolveAudioUrl(r.bvid, r.currentCid, null) ?: return
             holder.play(r, url, queue, 0L, 1.0f)

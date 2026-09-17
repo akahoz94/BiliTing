@@ -30,11 +30,13 @@ import com.tingbili.app.ui.common.ListItemRow
 @Composable
 fun HistoryScreen(
     onOpenPlayer: (BookRecord) -> Unit = {},
+    modifier: Modifier = Modifier,
     viewModel: HistoryViewModel = viewModel(factory = HistoryViewModel.Factory)
 ) {
     val history by viewModel.history.collectAsState()
     var showClearDialog by remember { mutableStateOf(false) }
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text("历史") },

@@ -10,3 +10,31 @@ data class PageItem(
     val part: String = "",
     val duration: Long = 0
 )
+
+/** /x/space/wbi/arc/search UP主全部投稿 */
+@Serializable
+data class AuthorVideosData(
+    val list: AuthorVideoList = AuthorVideoList(),
+    val page: AuthorVideoPage = AuthorVideoPage()
+)
+
+@Serializable
+data class AuthorVideoList(val vlist: List<AuthorVideo> = emptyList())
+
+@Serializable
+data class AuthorVideo(
+    val aid: Long = 0,
+    val bvid: String = "",
+    val title: String = "",
+    val author: String = "",
+    val pic: String = "",
+    val duration: String = "",
+    val length: String = ""
+)
+
+@Serializable
+data class AuthorVideoPage(
+    val count: Int = 0,
+    val pn: Int = 1,
+    val ps: Int = 30
+)

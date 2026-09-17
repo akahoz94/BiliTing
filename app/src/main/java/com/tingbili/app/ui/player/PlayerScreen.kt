@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +22,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
@@ -55,11 +59,26 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.tingbili.app.player.PartItem
+import com.tingbili.app.util.CoverUtil
 import com.tingbili.app.util.FormatUtil
 
+/**
+ * 播放页布局（借鉴成熟听书 App：
+ *   顶栏返回 + 收藏 →
+ *   中央大封面 →
+ *   标题/副标题紧贴封面下沿 →
+ *   进度条 + 当前/总时长 →
+ *   大播放按钮 + 倍速/定时/选集 横排）
+ *
+ * 注：书签（TimelineMarks）已移除。
+ */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.Factory)) {
+fun PlayerScreen(
+    onBack: () -> Unit = {},
+    onOpenAuthor: (Long, String, String) -> Unit = { _, _, _ -> },
+    viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.Factory)
+) {
     LaunchedEffect(Unit) { viewModel.bind() }
     DisposableEffect(Unit) { onDispose { viewModel.saveProgress() } }
     val s by viewModel.state.collectAsState()
@@ -75,50 +94,40 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
     var showSleep by remember { mutableStateOf(false) }
     var showParts by remember { mutableStateOf(false) }
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val fav = s.record?.isFavorite == true
 
-    // 顶部到封面的柔和渐变背景，淡化白屏感
     Box(
         Modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
                         MaterialTheme.colorScheme.background
                     )
                 )
             )
     ) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            Modifier.fillMaxSize(),
         ) {
-            // ===== 顶部：标题 + 收藏 =====
-            Spacer(Modifier.height(32.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        record.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+            // ===== 顶部：返回 + 收藏 =====
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Filled.ArrowBack,
+                        contentDescription = "返回",
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
-                    if (record.totalParts > 0) {
-                        Text(
-                            "第 ${record.currentPart} 集 / 共 ${record.totalParts} 集 · ${record.owner}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else if (record.owner.isNotBlank()) {
-                        Text(
-                            record.owner,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
-                val fav = s.record?.isFavorite == true
+                Spacer(Modifier.weight(1f))
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(
                         imageVector = if (fav) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -129,24 +138,30 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
                 }
             }
 
-            // ===== 中央：封面 =====
+            // ===== 中央：封面（自适应屏幕高度，避免与下方紧贴的标题隔太远）=====
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .padding(horizontal = 36.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    shadowElevation = 12.dp,
-                    modifier = Modifier.size(240.dp)
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.size(260.dp)
                 ) {
-                    if (record.cover.isNotBlank()) {
+                    val coverUrl = CoverUtil.normalize(record.cover)
+                    var coverFailed by remember { mutableStateOf(false) }
+                    if (coverUrl.isNotBlank() && !coverFailed) {
                         AsyncImage(
-                            model = record.cover,
+                            model = coverUrl,
                             contentDescription = record.title,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            onState = { state ->
+                                if (state is coil.compose.AsyncImagePainter.State.Error) coverFailed = true
+                            }
                         )
                     } else {
                         Box(
@@ -159,65 +174,155 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
                                             MaterialTheme.colorScheme.tertiary
                                         )
                                     )
-                                ),
-                            contentAlignment = Alignment.Center
+                                )
                         ) {
-                            Text(
-                                record.title.take(2).ifBlank { "听" },
-                                style = MaterialTheme.typography.displayLarge,
-                                color = Color.White.copy(alpha = 0.9f),
-                                fontWeight = FontWeight.Bold
-                            )
+                            Column(
+                                Modifier.fillMaxSize().padding(20.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    record.title.ifBlank { "听书" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White.copy(alpha = 0.95f),
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = Color.White.copy(alpha = 0.22f)
+                                ) {
+                                    Text(
+                                        if (record.totalParts > 0) "第 ${record.currentPart} 集 / ${record.totalParts}"
+                                        else "有声书",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // ===== 底部：进度 + 控制 =====
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Slider(
-                    value = s.positionMs.coerceIn(0, s.durationMs.coerceAtLeast(1)).toFloat(),
-                    onValueChange = { viewModel.seekTo(it.toLong()) },
-                    valueRange = 0f..s.durationMs.coerceAtLeast(1).toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary
-                    )
+            // ===== 标题/副标题 紧贴封面下沿 =====
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    record.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
                 )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(FormatUtil.progress(s.positionMs), style = MaterialTheme.typography.bodySmall)
-                    Text(FormatUtil.progress(s.durationMs), style = MaterialTheme.typography.bodySmall)
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = viewModel::prevPart) { Text("⏮", style = MaterialTheme.typography.titleLarge) }
-                    FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp)) {
-                        Text(if (s.isPlaying) "⏸" else "▶", style = MaterialTheme.typography.headlineMedium)
-                    }
-                    IconButton(onClick = viewModel::nextPart) { Text("⏭", style = MaterialTheme.typography.titleLarge) }
-                }
                 Spacer(Modifier.height(4.dp))
-                // 倍速 / 定时 / 选集（无评论）
+                val totalTxt = if (record.totalParts > 0) "第 ${record.currentPart}/${record.totalParts} 集" else null
+                val ownerTxt = record.owner
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SubAction(icon = "${s.speed}x", label = "倍速") { showSpeed = true }
-                    SubAction(
-                        icon = if (s.sleepRemainSec > 0) "${(s.sleepRemainSec / 60) + 1}min" else "定时",
-                        label = if (s.sleepRemainSec > 0) "剩余" else "定时"
-                    ) { showSleep = true }
-                    SubAction(
-                        icon = if (s.queue.isNotEmpty()) "${s.queue.size}集" else "单集",
-                        label = "选集",
-                        highlight = s.queue.isNotEmpty()
-                    ) { showParts = true }
+                    if (ownerTxt.isNotBlank()) {
+                        Text(
+                            ownerTxt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (record.ownerMid > 0) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (record.ownerMid > 0) Modifier.clickable {
+                                onOpenAuthor(record.ownerMid, ownerTxt, record.ownerAvatar)
+                            } else Modifier
+                        )
+                    }
+                    if (totalTxt != null) {
+                        if (ownerTxt.isNotBlank()) Text(" · ", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            totalTxt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ===== 进度条 + 时间码 =====
+            Slider(
+                value = s.positionMs.coerceIn(0, s.durationMs.coerceAtLeast(1)).toFloat(),
+                onValueChange = { viewModel.seekTo(it.toLong()) },
+                valueRange = 0f..s.durationMs.coerceAtLeast(1).toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(FormatUtil.progress(s.positionMs), style = MaterialTheme.typography.bodySmall)
+                Text(FormatUtil.progress(s.durationMs), style = MaterialTheme.typography.bodySmall)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ===== 大播放按钮 + 上/下一集 =====
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = viewModel::prevPart) {
+                    Text("⏮", style = MaterialTheme.typography.titleLarge)
+                }
+                Spacer(Modifier.width(24.dp))
+                FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp)) {
+                    Text(
+                        if (s.isPlaying) "⏸" else "▶",
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                }
+                Spacer(Modifier.width(24.dp))
+                IconButton(onClick = viewModel::nextPart) {
+                    Text("⏭", style = MaterialTheme.typography.titleLarge)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ===== 倍速 / 定时 / 选集 =====
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SubAction(icon = "${s.speed}x", label = "倍速") { showSpeed = true }
+                SubAction(
+                    icon = if (s.sleepRemainSec > 0) "${(s.sleepRemainSec / 60) + 1}min" else "定时",
+                    label = if (s.sleepRemainSec > 0) "剩余" else "定时"
+                ) { showSleep = true }
+                SubAction(
+                    icon = if (s.queue.isNotEmpty()) "${s.queue.size}集" else "单集",
+                    label = "选集",
+                    highlight = s.queue.isNotEmpty()
+                ) { showParts = true }
             }
         }
     }
@@ -248,8 +353,11 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
                                         else MaterialTheme.colorScheme.onSurface
                             )
                             if (selected) {
-                                Text("当前", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    "当前",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
@@ -279,8 +387,12 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
                             onClick = { viewModel.stopSleep(); showSleep = false },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("取消定时", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.error)
+                            Text(
+                                "取消定时",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
@@ -289,7 +401,7 @@ fun PlayerScreen(viewModel: PlayerViewModel = viewModel(factory = PlayerViewMode
         )
     }
 
-    // 选集弹窗（ModalBottomSheet，显示完整分 P 列表）
+    // 选集弹窗
     if (showParts) {
         val parts: List<PartItem> = s.queue
         ModalBottomSheet(

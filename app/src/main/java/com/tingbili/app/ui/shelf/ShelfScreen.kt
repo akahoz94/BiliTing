@@ -25,10 +25,11 @@ import com.tingbili.app.ui.common.ListItemRow
 @Composable
 fun ShelfScreen(
     onOpenPlayer: (BookRecord) -> Unit = {},
+    modifier: Modifier = Modifier,
     viewModel: ShelfViewModel = viewModel(factory = ShelfViewModel.Factory)
 ) {
     val favorites by viewModel.favorites.collectAsState()
-    Scaffold(topBar = { TopAppBar(title = { Text("书架") }) }) { padding ->
+    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("书架") }) }) { padding ->
         if (favorites.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("还没有收藏，去搜索添加吧", color = MaterialTheme.colorScheme.outline)
