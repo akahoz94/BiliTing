@@ -33,6 +33,9 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -240,6 +243,47 @@ fun SettingsScreen(
                             title = if (webdavUrl.isBlank()) "配置 WebDAV 备份" else "修改 WebDAV",
                             subtitle = "本地 AES-GCM 加密 · 兼容坚果云 / Nextcloud",
                             onClick = { showWebDav = true }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(40.dp))
+            }
+            item {
+                SectionHeader("关于", Icons.Filled.Info)
+                SettingsCard {
+                    Column {
+                        val ctx = LocalContext.current
+                        NavRow(
+                            icon = Icons.Filled.Info,
+                            title = "BiliTing",
+                            subtitle = "v" + com.tingbili.app.BuildConfig.VERSION_NAME + " (build " + com.tingbili.app.BuildConfig.VERSION_CODE + ")",
+                            onClick = {}
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.Folder,
+                            title = "GitHub 仓库",
+                            subtitle = "https://github.com/akahoz94/BiliTing",
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                        data = android.net.Uri.parse("https://github.com/akahoz94/BiliTing")
+                                    })
+                                }
+                            }
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.Folder,
+                            title = "检查更新 / Releases",
+                            subtitle = "查看最新版本和下载 APK",
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                        data = android.net.Uri.parse("https://github.com/akahoz94/BiliTing/releases")
+                                    })
+                                }
+                            }
                         )
                     }
                 }

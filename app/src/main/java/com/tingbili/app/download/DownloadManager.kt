@@ -148,12 +148,12 @@ class DownloadManager(
         bvid: String?, cid: Long?, auid: Long?,
         recordId: String
     ): List<String> {
-        val primary = repo.resolveAudioUrl(bvid, cid, auid)
+        // 只调一次 playUrl：先 resolveAudioUrl 再 candidates 会二次请求同视频，
+        // B 站短时间内第二次 playUrl 触发风控返回空 → 一直"未拿到可用 URL"
         val multi = repo.candidates(bvid, cid).toMutableList()
-        if (!primary.isNullOrBlank() && multi.isEmpty()) multi.add(primary)
 
-        // auid 单独存在但上面没拿到 → 单独追加 auid 通道的 URL
-        if (auid != null && auid > 0L && multi.isEmpty()) {
+        // DASH 没拿到且有 auid → 走音频区直链
+        if (multi.isEmpty() && auid != null && auid > 0L) {
             val au = repo.resolveAudioUrl(null, null, auid)
             if (!au.isNullOrBlank()) multi.add(au)
         }

@@ -14,8 +14,8 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "0.17.1"
+        versionCode = 29
+        versionName = "0.17.2"
     }
 
     // debug keystore：保证 release 也用同一份密钥，方便侧载且升级时签名一致
@@ -45,7 +45,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
