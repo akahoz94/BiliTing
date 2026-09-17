@@ -15,8 +15,10 @@ class CookieStore(private val context: Context) {
     private val keySessdata = stringPreferencesKey("sessdata")
     private val keyCookie = stringPreferencesKey("cookie")
 
-    suspend fun buvid3(): String = dataStore.data.map { it[keyBuvid3] ?: "" }.first()
-    suspend fun cookieHeader(): String = dataStore.data.map { it[keyCookie] ?: "" }.first()
+    // DataStore 读到坏文件/磁盘异常会抛，这里一律兜底为空，绝不让崩溃冒泡到启动主线程；
+    // Preferences DataStore 自带的 corruption handler 会在首次失败后重置文件，下次读取即正常。
+    suspend fun buvid3(): String = runCatching { dataStore.data.map { it[keyBuvid3] ?: "" }.first() }.getOrDefault("")
+    suspend fun cookieHeader(): String = runCatching { dataStore.data.map { it[keyCookie] ?: "" }.first() }.getOrDefault("")
     suspend fun save(buvid3: String, cookie: String) =
-        dataStore.edit { it[keyBuvid3] = buvid3; it[keyCookie] = cookie }
+        runCatching { dataStore.edit { it[keyBuvid3] = buvid3; it[keyCookie] = cookie } }
 }

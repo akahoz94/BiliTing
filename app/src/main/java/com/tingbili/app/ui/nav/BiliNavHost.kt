@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -15,8 +16,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,16 +38,18 @@ import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.player.PlayerLauncher
 import com.tingbili.app.ui.author.AuthorScreen
+import com.tingbili.app.ui.downloads.DownloadScreen
 import com.tingbili.app.ui.history.HistoryScreen
 import com.tingbili.app.ui.player.PlayerScreen
 import com.tingbili.app.ui.search.SearchScreen
 import com.tingbili.app.ui.settings.SettingsScreen
-import com.tingbili.app.ui.shelf.ShelfScreen
+import com.tingbili.app.ui.playlist.PlaylistScreen
+import com.tingbili.app.util.ErrorBus
 import com.tingbili.app.ui.stats.StatsScreen
 import kotlinx.coroutines.launch
 
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Shelf("shelf", "书架", Icons.Filled.Bookmarks),
+    Playlist("playlist", "听单", Icons.Filled.Headphones),
     Search("search", "搜索", Icons.Filled.Search),
     History("history", "历史", Icons.Filled.History),
     Settings("settings", "设置", Icons.Filled.Settings)
@@ -57,8 +65,27 @@ fun BiliNavHost() {
     val context = LocalContext.current
     val container = (context.applicationContext as BiliTingApplication).container
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val launcher = remember {
-        PlayerLauncher(container.playerHolder, container.playRepo, container.libraryRepo, container.biliService)
+        container.playerLauncher
+    }
+
+    // 订阅全局错误总线：任意 ViewModel/Repository 抛出异常都可以 ErrorBus.post()，
+    // Snackbar 会自动弹出；带 retry 的 error 会附带"重试"按钮。
+    LaunchedEffect(Unit) {
+        ErrorBus.errors.collect { err ->
+            scope.launch {
+                val result = snackbarHostState.showSnackbar(
+                    message = err.message,
+                    actionLabel = if (err.retry != null) err.retryLabel else null,
+                    withDismissAction = err.retry == null,
+                    duration = SnackbarDuration.Short
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    err.retry?.invoke()
+                }
+            }
+        }
     }
 
     // 是否为 tab 主页面（显示底部栏；播放页/作者页为全屏，不显示底部栏也不显示迷你条）
@@ -82,6 +109,7 @@ fun BiliNavHost() {
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (isTab) {
                 Column {
@@ -112,11 +140,11 @@ fun BiliNavHost() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Tab.Shelf.route,
+            startDestination = Tab.Playlist.route,
             modifier = Modifier.fillMaxSize()
         ) {
-            composable(Tab.Shelf.route) {
-                ShelfScreen(
+            composable(Tab.Playlist.route) {
+                PlaylistScreen(
                     onOpenPlayer = ::resumeAndNavigate,
                     modifier = Modifier.padding(padding)
                 )
@@ -137,6 +165,7 @@ fun BiliNavHost() {
             composable(Tab.Settings.route) {
                 SettingsScreen(
                     onOpenStats = { navController.navigate("stats") },
+                    onOpenDownloads = { navController.navigate("downloads") },
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -162,6 +191,12 @@ fun BiliNavHost() {
             }
             composable("stats") {
                 StatsScreen(modifier = Modifier.padding(padding))
+            }
+            composable("downloads") {
+                DownloadScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenPlayer = { navController.navigate("player") }
+                )
             }
         }
     }

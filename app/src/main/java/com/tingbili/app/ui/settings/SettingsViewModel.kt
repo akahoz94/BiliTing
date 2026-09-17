@@ -29,6 +29,9 @@ class SettingsViewModel(
     val webdavUrl: StateFlow<String> = store.webdavUrl.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val webdavUser: StateFlow<String> = store.webdavUser.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val immersiveMode: StateFlow<Int> = store.immersiveMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 60)
+    val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -55,6 +58,9 @@ class SettingsViewModel(
     fun setWebdavUser(v: String) = viewModelScope.launch { store.setWebdavUser(v) }
     fun setWebdavPass(v: String) = viewModelScope.launch { store.setWebdavPass(v) }
     fun setImmersiveMode(v: Int) = viewModelScope.launch { store.setImmersiveMode(v) }
+    fun setPaletteStrength(v: Int) = viewModelScope.launch { store.setPaletteStrength(v) }
+    fun setAutoNextEnabled(v: Boolean) = viewModelScope.launch { store.setAutoNextEnabled(v) }
+    fun setRememberSpeedPerAuthor(v: Boolean) = viewModelScope.launch { store.setRememberSpeedPerAuthor(v) }
 
     /** WebDAV 备份到云端；返回结果会推到 msg 中 */
     fun webdavBackup(pass: String) {
@@ -85,6 +91,21 @@ class SettingsViewModel(
                 app.container.libraryRepo.replaceAll(list)
                 _msg.value = "已恢复 ${list.size} 条"
             }, { _msg.value = "恢复失败：${it.message}" })
+            _busy.value = false
+        }
+    }
+
+    /** 仅测试连接，不传输数据；用来排查"用户名密码/URL 不对"的问题 */
+    fun webdavPing() {
+        val baseUrl = webdavUrl.value.trim()
+        val user = webdavUser.value.trim()
+        if (baseUrl.isBlank() || user.isBlank()) {
+            _msg.value = "请先填写 WebDAV 地址和用户名"; return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            val ok = WebDavBackup(baseUrl, user, "", "").ping()
+            _msg.value = if (ok) "连接成功 ✓" else "连接失败：检查地址和用户名/密码"
             _busy.value = false
         }
     }

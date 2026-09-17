@@ -19,8 +19,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = (application as BiliTingApplication).settingsStore
-        // 读一次已持久化的主题，让系统栏图标配色与主题保持一致
-        val savedTheme = runBlocking { settings.themeMode.first() }
+        // 读一次已持久化的主题，让系统栏图标配色与主题保持一致。
+        // SettingsStore 的 Flow 内部已统一加 runCatching 兜底；这里也再包一层 runBlocking 异常防护，
+        // 防止 DataStore 文件损坏时直接把启动拖死。
+        val savedTheme = runCatching {
+            runBlocking { settings.themeMode.first() }
+        }.getOrDefault(0)
         val dark = when (savedTheme) {
             1 -> false
             2 -> true

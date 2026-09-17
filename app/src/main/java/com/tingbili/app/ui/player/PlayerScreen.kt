@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,9 +59,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.tingbili.app.BiliTingApplication
+import com.tingbili.app.download.DownloadManager
 import com.tingbili.app.player.PartItem
 import com.tingbili.app.util.CoverUtil
 import com.tingbili.app.util.FormatUtil
+import kotlinx.coroutines.launch
 
 /**
  * 播放页（主题色沉浸 + 完整换肤）。
@@ -89,37 +94,35 @@ fun PlayerScreen(
         return
     }
 
-    // 沉浸式背景：0=主题色渐变（默认） 1=极简底色（与主界面 background 同色）
+    // 沉浸式背景：通过 CoverColorBackground 渲染三策略（封面取色 / 主题色 / 极简）
     val context = androidx.compose.ui.platform.LocalContext.current
     val settingsStore = (context.applicationContext as com.tingbili.app.BiliTingApplication).settingsStore
-    val immersiveMode by settingsStore.immersiveMode.collectAsState(initial = 0)
-    val brush = if (immersiveMode == 1) {
-        Brush.verticalGradient(
-            listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                MaterialTheme.colorScheme.background
-            )
-        )
+    val downloadManager = (context.applicationContext as BiliTingApplication).container.downloadManager
+    val scope = rememberCoroutineScope()
+    val dlTasks by downloadManager.tasks.collectAsState()
+    val dlKey = when {
+        record.auid != null && record.auid != 0L -> downloadManager.keyOf(record.id, null, null, record.auid)
+        else -> downloadManager.keyOf(record.id, record.bvid, record.currentCid, null)
+    }
+    val dlDone = downloadManager.isDownloaded(dlKey)
+    val dlState = dlTasks[dlKey]
+    val dlRunningPct = (dlState as? DownloadManager.TaskState.Running)?.let {
+        if ((it.total ?: 0) > 0) (it.bytes * 100 / it.total!!) else null
     }
 
     var showSpeed by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showParts by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val fav = s.record?.isFavorite == true
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .navigationBarsPadding()
-            .background(brush)
-    ) {
+    CoverColorBackground(
+        record = record,
+        settings = settingsStore
+    ) { palette, contentColor ->
         Column(Modifier.fillMaxSize()) {
-            // ===== 顶部：返回 + 收藏 =====
+            // ===== 顶部：返回 + 收藏 + ⚙ =====
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -131,7 +134,7 @@ fun PlayerScreen(
                     Icon(
                         Icons.Filled.ArrowBack,
                         contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = contentColor
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -140,7 +143,14 @@ fun PlayerScreen(
                         imageVector = if (fav) Icons.Filled.Star else Icons.Outlined.StarBorder,
                         contentDescription = if (fav) "取消收藏" else "收藏",
                         tint = if (fav) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant
+                               else contentColor
+                    )
+                }
+                IconButton(onClick = { showSettings = true }) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "播放设置",
+                        tint = contentColor
                     )
                 }
             }
@@ -186,7 +196,7 @@ fun PlayerScreen(
                             Text(
                                 record.title.ifBlank { "听书" },
                                 style = MaterialTheme.typography.titleMedium,
-                                color = Color.White.copy(alpha = 0.95f),
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
                                 maxLines = 3,
@@ -210,6 +220,7 @@ fun PlayerScreen(
                     record.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = contentColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center
@@ -227,7 +238,7 @@ fun PlayerScreen(
                             ownerTxt,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (record.ownerMid > 0) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    else contentColor.copy(alpha = 0.75f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = if (record.ownerMid > 0) Modifier.clickable {
@@ -239,12 +250,12 @@ fun PlayerScreen(
                         if (ownerTxt.isNotBlank()) Text(
                             " · ",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = contentColor.copy(alpha = 0.75f)
                         )
                         Text(
                             totalTxt,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = contentColor.copy(alpha = 0.75f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -269,8 +280,8 @@ fun PlayerScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(FormatUtil.progress(s.positionMs), style = MaterialTheme.typography.bodySmall)
-                Text(FormatUtil.progress(s.durationMs), style = MaterialTheme.typography.bodySmall)
+                Text(FormatUtil.progress(s.positionMs), style = MaterialTheme.typography.bodySmall, color = contentColor)
+                Text(FormatUtil.progress(s.durationMs), style = MaterialTheme.typography.bodySmall, color = contentColor)
             }
 
             Spacer(Modifier.height(12.dp))
@@ -282,7 +293,7 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = viewModel::prevPart) {
-                    Text("⏮", style = MaterialTheme.typography.titleLarge)
+                    Text("⏮", style = MaterialTheme.typography.titleLarge, color = contentColor)
                 }
                 Spacer(Modifier.width(24.dp))
                 FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp)) {
@@ -293,7 +304,7 @@ fun PlayerScreen(
                 }
                 Spacer(Modifier.width(24.dp))
                 IconButton(onClick = viewModel::nextPart) {
-                    Text("⏭", style = MaterialTheme.typography.titleLarge)
+                    Text("⏭", style = MaterialTheme.typography.titleLarge, color = contentColor)
                 }
             }
 
@@ -307,18 +318,61 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SubAction(icon = "${s.speed}x", label = "倍速") { showSpeed = true }
+                SubAction(icon = "${s.speed}x", label = "倍速", tint = contentColor) { showSpeed = true }
                 SubAction(
                     icon = if (s.sleepRemainSec > 0) "${(s.sleepRemainSec / 60) + 1}min" else "定时",
-                    label = if (s.sleepRemainSec > 0) "剩余" else "定时"
+                    label = if (s.sleepRemainSec > 0) "剩余" else "定时",
+                    tint = contentColor
                 ) { showSleep = true }
+                SubAction(
+                    icon = when {
+                        dlDone -> "✓"
+                        dlRunningPct != null -> "$dlRunningPct%"
+                        dlState is DownloadManager.TaskState.Failed -> "重试"
+                        else -> "下载"
+                    },
+                    label = when {
+                        dlDone -> "已缓存"
+                        dlRunningPct != null -> "下载中"
+                        dlState is DownloadManager.TaskState.Failed -> "失败"
+                        else -> "离线"
+                    },
+                    highlight = dlDone || dlRunningPct != null,
+                    tint = contentColor
+                ) {
+                    if (!dlDone && dlRunningPct == null) {
+                        val partTitle = s.queue.getOrNull(s.queueIndex)?.part ?: ""
+                        scope.launch {
+                            downloadManager.download(
+                                recordId = record.id,
+                                bookTitle = record.title,
+                                cover = record.cover,
+                                bvid = record.bvid,
+                                cid = record.currentCid,
+                                auid = record.auid,
+                                partTitle = partTitle
+                            )
+                        }
+                    }
+                }
                 SubAction(
                     icon = if (s.queue.isNotEmpty()) "${s.queue.size}集" else "单集",
                     label = "选集",
-                    highlight = s.queue.isNotEmpty()
+                    highlight = s.queue.isNotEmpty(),
+                    tint = contentColor
                 ) { showParts = true }
             }
         }
+    }
+
+    // ===== 播放设置抽屉 =====
+    if (showSettings) {
+        PlayerSettingsSheet(
+            settings = settingsStore,
+            currentSpeed = s.speed,
+            onSpeedChange = { viewModel.setSpeed(it) },
+            onDismiss = { showSettings = false }
+        )
     }
 
     // 倍速弹窗
@@ -464,7 +518,7 @@ fun PlayerScreen(
                                     Text(
                                         "${index + 1}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Spacer(Modifier.width(14.dp))
@@ -501,7 +555,7 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun SubAction(icon: String, label: String, highlight: Boolean = false, onClick: () -> Unit) {
+private fun SubAction(icon: String, label: String, highlight: Boolean = false, tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.clickable(onClick = onClick).padding(8.dp)
@@ -510,13 +564,13 @@ private fun SubAction(icon: String, label: String, highlight: Boolean = false, o
             icon,
             style = MaterialTheme.typography.titleMedium,
             color = if (highlight) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface
+                    else tint
         )
         Spacer(Modifier.height(2.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = tint.copy(alpha = 0.75f)
         )
     }
 }

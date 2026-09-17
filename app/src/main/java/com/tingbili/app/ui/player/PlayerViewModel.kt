@@ -17,6 +17,7 @@ import com.tingbili.app.player.SleepTimer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(
@@ -42,15 +43,19 @@ class PlayerViewModel(
 
     private var sleepRemain = -1
     private var sleepTotalMs = 0L
+    private var sleepStartElapsed = 0L
     private var autoNextFired = false
 
     private val sleepTimer = SleepTimer(
         onFire = {
             holder.pause()
+            holder.setVolume(1f)
             sleepRemain = -1
             _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = false)
         },
-        isPlayingProvider = { holder.player.isPlaying }
+        isPlayingProvider = { holder.player.isPlaying },
+        setVolume = { v -> holder.setVolume(v) },
+        fadeOutMs = 30_000L
     )
 
     fun bind() {
@@ -73,7 +78,10 @@ class PlayerViewModel(
                     positionMs = p.currentPosition,
                     durationMs = p.duration.coerceAtLeast(0L),
                     speed = p.playbackParameters.speed,
-                    sleepRemainSec = sleepRemain,
+                    sleepRemainSec = if (sleepTotalMs > 0L) {
+                        val remain = sleepTotalMs - (System.currentTimeMillis() - sleepStartElapsed)
+                        (remain / 1000L).toInt().coerceAtLeast(0)
+                    } else -1,
                     sleepEndOfTrack = sleepTimer.isEndOfTrack(),
                     queue = holder.currentQueue(),
                     queueIndex = holder.currentQueueIndex()
@@ -86,7 +94,15 @@ class PlayerViewModel(
     fun toggle() { holder.togglePlay() }
     fun setSpeed(v: Float) {
         holder.setSpeed(v)
-        viewModelScope.launch { settings.setPlaybackSpeed(v) }
+        viewModelScope.launch {
+            settings.setPlaybackSpeed(v)
+            // 按 UP 主记忆倍速
+            val mid = holder.record.value?.ownerMid ?: 0L
+            val remember = settings.rememberSpeedPerAuthor.firstOrNull() ?: false
+            if (remember && mid > 0L) {
+                settings.setAuthorSpeed(mid.toString(), v)
+            }
+        }
     }
     fun seekTo(ms: Long) { holder.seekTo(ms) }
 
@@ -97,18 +113,22 @@ class PlayerViewModel(
     fun startSleep(minutes: Int) {
         sleepTotalMs = minutes * 60_000L
         sleepRemain = minutes * 60
+        sleepStartElapsed = System.currentTimeMillis()
         sleepTimer.start(minutes)
     }
 
     fun startSleepEndOfTrack() {
         sleepTimer.startEndOfTrack()
         sleepRemain = -1
+        sleepTotalMs = 0L
         _state.value = _state.value.copy(sleepEndOfTrack = true)
     }
 
     fun stopSleep() {
         sleepTimer.stop()
+        holder.setVolume(1f)
         sleepRemain = -1
+        sleepTotalMs = 0L
         _state.value = _state.value.copy(sleepEndOfTrack = false)
     }
 
@@ -149,7 +169,8 @@ class PlayerViewModel(
                         app.container.playerHolder,
                         app.container.playRepo,
                         app.container.libraryRepo,
-                        app.container.biliService
+                        app.container.biliService,
+                        app.settingsStore
                     ),
                     app.settingsStore
                 )

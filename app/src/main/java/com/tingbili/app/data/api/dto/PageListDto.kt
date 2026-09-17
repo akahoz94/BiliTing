@@ -38,3 +38,10 @@ data class AuthorVideoPage(
     val pn: Int = 1,
     val ps: Int = 30
 )
+
+/** app.bilibili.com/x/v2/space/archive 返回结构：data.vlist（与 web 端 data.list.vlist 不同） */
+@Serializable
+data class AppArchiveData(
+    val vlist: List<AuthorVideo> = emptyList(),
+    val page: AuthorVideoPage = AuthorVideoPage()
+)

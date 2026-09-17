@@ -8,17 +8,19 @@ import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.data.repo.PlayRepository
 import com.tingbili.app.data.repo.SearchRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 
 /**
- * 播放拉起器：把任意入口（搜索/书架/历史）转成 ExoPlayer 播放，并写本地记录。
+ * 播放拉起器：把任意入口（搜索/听单/历史）转成 ExoPlayer 播放，并写本地记录。
  * 队列元素使用 PartItem（含 part 名称与时长），音频记录队列为空。
  */
 class PlayerLauncher(
     private val holder: PlayerHolder,
     private val playRepo: PlayRepository,
     private val library: LibraryRepository,
-    private val biliService: BiliApiService
+    private val biliService: BiliApiService,
+    private val settings: com.tingbili.app.data.local.SettingsStore? = null
 ) {
     /** 搜索结果点击播放：video 走 pagelist→resolveVideo→第一P；audio 走音频区 */
     suspend fun playSearchItem(item: SearchItem) {
@@ -58,16 +60,21 @@ class PlayerLauncher(
         }
     }
 
-    /** 书架/历史续播：用 Room 已有进度续播，重建分P 队列支持上下集 */
+    /** 听单/历史续播：用 Room 已有进度续播，重建分P 队列支持上下集 */
     suspend fun playRecord(record: BookRecord) {
         val existing = library.get(record.id) ?: record
         val positionMs = existing.progressMs.coerceAtLeast(0L)
+        // 解析速度：BookRecord.speed > 按 UP 主记忆 > 全局默认
+        val initialSpeed = when {
+            existing.speed > 0.05f && existing.speed < 4f -> existing.speed
+            else -> resolvePerAuthorSpeed(existing.ownerMid) ?: 1.0f
+        }
         if (existing.type == "audio" || existing.bvid.isNullOrBlank()) {
             val auid = existing.auid
             if (auid == null || auid <= 0L) return
             val url = playRepo.resolveAudioUrl(null, null, auid) ?: return
-            val r = existing.copy(progressMs = 0L)
-            holder.play(r, url, emptyList(), positionMs, 1.0f)
+            val r = existing.copy(progressMs = 0L, speed = initialSpeed)
+            holder.play(r, url, emptyList(), positionMs, initialSpeed)
             library.recordPlayed(r)
         } else {
             val bvid = existing.bvid!!
@@ -83,13 +90,24 @@ class PlayerLauncher(
                 progressMs = 0L,
                 currentCid = cid,
                 currentPart = idx + 1,
-                totalParts = queue.size
+                totalParts = queue.size,
+                speed = initialSpeed
             )
             val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
-            holder.play(r, url, queue, positionMs, existing.speed.coerceAtLeast(0.5f))
+            holder.play(r, url, queue, positionMs, initialSpeed)
             holder.moveQueueTo(idx)
             library.recordPlayed(r)
         }
+    }
+
+    /** 按 UP 主 mid 解析倍速（如开启）。返回 null 表示未命中 */
+    private suspend fun resolvePerAuthorSpeed(mid: Long): Float? {
+        val s = settings ?: return null
+        if (mid <= 0L) return null
+        val remember = s.rememberSpeedPerAuthor.firstOrNull() ?: false
+        if (!remember) return null
+        val sp = s.authorSpeedFlow(mid.toString()).firstOrNull()
+        return sp?.takeIf { it in 0.5f..3.0f }
     }
 
     /**
@@ -113,6 +131,26 @@ class PlayerLauncher(
             Log.w("PlayerLauncher", "view 兜底失败：${t.message}")
             r
         }
+    }
+
+    /** 播放本地已下载分集（离线），不联网 */
+    suspend fun playLocalFile(item: com.tingbili.app.download.DownloadManager.Item, localFile: java.io.File) {
+        val record = BookRecord(
+            id = item.key,
+            title = item.bookTitle.ifBlank { item.partTitle },
+            owner = "",
+            type = if (item.auid != null) "audio" else "video",
+            cover = item.cover,
+            bvid = item.bvid,
+            auid = item.auid,
+            currentCid = item.cid,
+            currentPart = 1,
+            totalParts = 0,
+            progressMs = 0L
+        )
+        val uri = android.net.Uri.fromFile(localFile).toString()
+        holder.play(record, uri, emptyList(), 0L, 1.0f)
+        library.recordPlayed(record)
     }
 
     /** 下一集：队列下标 +1 后解析播放（从头），写记录 */

@@ -9,6 +9,7 @@ import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.SettingsStore
 import com.tingbili.app.data.repo.SearchRepository
+import com.tingbili.app.util.ErrorBus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +72,11 @@ class SearchViewModel(
                 )
             }.onFailure { e ->
                 _state.value = _state.value.copy(loading = false, error = e.message)
+                // 全局错误提示 + 重试按钮
+                ErrorBus.post(
+                    message = "搜索失败：${e.message ?: "网络异常"}",
+                    retry = { search(page) }
+                )
             }
         }
     }

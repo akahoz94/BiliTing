@@ -1,5 +1,6 @@
 package com.tingbili.app.data.api
 
+import com.tingbili.app.data.api.dto.AppArchiveData
 import com.tingbili.app.data.api.dto.AudioUrlData
 import com.tingbili.app.data.api.dto.AuthorVideosData
 import com.tingbili.app.data.api.dto.BiliResponse
@@ -113,6 +114,35 @@ interface BiliApiService {
         @Query("platform") platform: String = "web",
         @Query("web_location") webLocation: String = "1550101"
     ): BiliResponse<AuthorVideosData>
+
+    /**
+     * 旧版 UP 投稿接口 + wbi 签名：部分账号/时段 B 站强制要求该旧端点也带签名，
+     * 否则返回空列表或 -403。作为旧无签名接口的补充兜底。
+     */
+    @GET("x/space/arc/search")
+    suspend fun authorVideosLegacyWbi(
+        @Query("mid") mid: Long,
+        @Query("ps") ps: Int,
+        @Query("pn") pn: Int,
+        @Query("keyword") keyword: String = "",
+        @Query("order") order: String = "pubdate",
+        @Query("platform") platform: String = "web",
+        @Query("web_location") webLocation: String = "1550101",
+        @Query("w_rid") wRid: String,
+        @Query("wts") wts: String
+    ): BiliResponse<AuthorVideosData>
+
+    /** B站手机端 UP 投稿接口（独立风控栈，作为最末兜底） */
+    @GET
+    suspend fun authorAppArchive(
+        @Url url: String = "https://app.bilibili.com/x/v2/space/archive",
+        @Query("mid") mid: Long,
+        @Query("order") order: String = "pubdate",
+        @Query("pn") pn: Int,
+        @Query("ps") ps: Int,
+        @Query("tid") tid: Int = 0,
+        @Query("keyword") keyword: String = ""
+    ): BiliResponse<AppArchiveData>
 }
 
 @kotlinx.serialization.Serializable

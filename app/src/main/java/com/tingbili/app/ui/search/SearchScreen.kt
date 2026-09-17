@@ -91,17 +91,12 @@ fun SearchScreen(
                     }
                 }
             }
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                listOf("video" to "视频", "audio" to "音频", "all" to "全部").forEach { (type, label) ->
-                    FilterChip(
-                        selected = s.type == type,
-                        onClick = { viewModel.onTypeChange(type) },
-                        label = { Text(label) },
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
-                }
+            Row(
+                Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("听书优先", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.weight(1f))
-                Text("听书优先", style = MaterialTheme.typography.bodySmall)
                 Switch(checked = s.listeningOnly, onCheckedChange = viewModel::onListeningOnlyChange)
             }
             if (s.error != null) Text(s.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp))
