@@ -60,6 +60,7 @@ class PlayerViewModel(
 
     fun bind() {
         viewModelScope.launch {
+            var ticks = 0
             while (true) {
                 val p = holder.player
                 val ended = !p.isPlaying && p.playbackState == Player.STATE_ENDED
@@ -86,6 +87,9 @@ class PlayerViewModel(
                     queue = holder.currentQueue(),
                     queueIndex = holder.currentQueueIndex()
                 )
+                // 每 10 次循环（约 5 秒）落盘一次进度，防止系统回收/强杀丢进度
+                ticks++
+                if (ticks % 10 == 0 && p.isPlaying) saveProgress()
                 delay(500)
             }
         }

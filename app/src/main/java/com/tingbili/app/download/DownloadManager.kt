@@ -17,21 +17,31 @@ import java.io.File
 /**
  * 离线下载管理：分集音频下载到 filesDir/downloads（无需存储权限），
  * 用 JSON 索引文件记录已下载分集（避免引入 Room 迁移）。进度经 tasks 暴露给 UI。
+ *
+ * 关键设计：
+ *   - 复用 AppContainer 注入的 OkHttpClient（已带 UA/Referer/Cookie 全局拦截器）
+ *   - 多 CDN 候选 URL（upcdn → upgcxcode）顺序重试
+ *   - auid 路径解析失败时自动 fallback 到 bvid+cid DASH
+ *   - 请求带 Range: bytes=0- 让 CDN 返回 206，便于流式下载与失败即时重试
  */
 class DownloadManager(
     private val context: Context,
     private val playRepo: PlayRepository?,
-    private val cookieStore: CookieStore? = null
+    private val cookieStore: CookieStore? = null,
+    private val httpClient: OkHttpClient? = null
 ) {
     private val dir = File(context.filesDir, "downloads").apply { mkdirs() }
     private val indexFile = File(dir, "index.json")
 
-    /**
-     * 实时读取 cookie header（不在构造时 runBlocking，避免 IO 阻塞启动链）。
-     * B 站音频直链 412/403 频发 —— 必须带 buvid3/buvid4/b_nut 才能下载成功。
-     * 没有 CookieStore 时降级用 WbiSigner 现场生成一组，让请求至少带上 buvid3。
-     */
-    private fun buildCookieHeader(): String {
+    private val client: OkHttpClient by lazy {
+        httpClient ?: OkHttpClient.Builder()
+            .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** 从 CookieStore 读 cookie；失败时退回临时 buvid3。OkHttp client 的拦截器会补 UA/Referer。 */
+    private fun cookieHeader(): String {
         val live = runCatching {
             runBlocking { cookieStore?.cookieHeader() ?: "" }
         }.getOrDefault("")
@@ -41,11 +51,6 @@ class DownloadManager(
                 "b_nut=${System.currentTimeMillis() / 1000}"
         }
     }
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
 
     @Serializable
     data class Item(
@@ -83,7 +88,15 @@ class DownloadManager(
 
     fun localFile(item: Item): File = File(dir, item.fileName)
 
-    /** 下载一集音频到本地。已在本地则直接返回 true。 */
+    /**
+     * 下载一集音频。
+     *
+     * 流程：
+     *   1) playRepo.resolveAudioUrl 解析首个候选 URL
+     *   2) 失败时尝试 playRepo.candidates() 拉多 CDN 候选，逐个 GET 重试
+     *   3) auid 单独失败时通过 service.pagelist 反查 bvid+cid 再走 DASH（按入参 bookId 推断 bvid）
+     *   4) 任一 URL 成功即写入本地，索引 + 进度
+     */
     suspend fun download(
         recordId: String, bookTitle: String, cover: String,
         bvid: String?, cid: Long?, auid: Long?, partTitle: String
@@ -92,53 +105,109 @@ class DownloadManager(
         if (isDownloaded(key)) return true
         if (_tasks.value[key] is TaskState.Running) return true
         val repo = playRepo ?: run {
-            _tasks.value = _tasks.value + (key to TaskState.Failed("下载服务未就绪"))
-            return false
-        }
-        val url = repo.resolveAudioUrl(bvid, cid, auid) ?: run {
-            Log.w(TAG, "[DL] 解析 URL 失败 key=$key bvid=$bvid cid=$cid auid=$auid")
-            val msg = "解析音频 URL 失败（cid/bvid 可能不匹配）"
+            val msg = "下载服务未就绪"
             _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
-            ErrorBus.post(
-                message = "下载失败：$msg",
-                retry = {
-                    kotlinx.coroutines.GlobalScope.let { /* no-op; UI 端有 retry 入口 */ }
-                },
-                retryLabel = "再试一次"
-            )
+            ErrorBus.post(message = "下载失败：$msg")
             return false
         }
-        Log.i(TAG, "[DL] 解析 URL 成功 key=$key url=${url.take(60)}...")
 
         _tasks.value = _tasks.value + (key to TaskState.Running(0, null))
         val fileName = buildFileName(bookTitle, partTitle, key)
-        val cookieHeader = buildCookieHeader()
+
+        // 解析候选 URL：先按入参解析，再尝试播放库反查 bvid+cid
+        val candidates = resolveCandidates(repo, bvid, cid, auid, recordId)
+        if (candidates.isEmpty()) {
+            val msg = "未拿到可用音频 URL（bvid=${bvid ?: "空"} cid=${cid ?: "空"} auid=${auid ?: "空"}；常见原因：未登录 → 设置里粘 SESSDATA 后重试）"
+            Log.w(TAG, "[DL] $msg key=$key")
+            _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
+            ErrorBus.post(message = "下载失败：$msg")
+            return false
+        }
+        Log.i(TAG, "[DL] 解析到 ${candidates.size} 个候选 URL key=$key")
+
+        for ((idx, url) in candidates.withIndex()) {
+            Log.i(TAG, "[DL] 尝试 URL#${idx + 1}/${candidates.size} key=$key url=${url.take(80)}...")
+            val ok = tryDownloadOne(key, url, fileName, bookTitle, cover, recordId, bvid, cid, auid, partTitle)
+            if (ok) return true
+        }
+
+        val msg = "全部 ${candidates.size} 个 URL 均失败"
+        _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
+        ErrorBus.post(message = "下载失败：$msg")
+        return false
+    }
+
+    /**
+     * 解析下载候选 URL 列表。
+     * - 已有 bvid+cid → candidates(bvid,cid) 多 CDN
+     * - 仅有 auid     → audioApi.url(auid)（如有）
+     * - 若 auid 单独失败：通过记录 id 推断 bvid 重新 pagelist 拿 cid，再走 DASH
+     */
+    private suspend fun resolveCandidates(
+        repo: PlayRepository,
+        bvid: String?, cid: Long?, auid: Long?,
+        recordId: String
+    ): List<String> {
+        val primary = repo.resolveAudioUrl(bvid, cid, auid)
+        val multi = repo.candidates(bvid, cid).toMutableList()
+        if (!primary.isNullOrBlank() && multi.isEmpty()) multi.add(primary)
+
+        // auid 单独存在但上面没拿到 → 单独追加 auid 通道的 URL
+        if (auid != null && auid > 0L && multi.isEmpty()) {
+            val au = repo.resolveAudioUrl(null, null, auid)
+            if (!au.isNullOrBlank()) multi.add(au)
+        }
+
+        // 兜底：recordId="video:BVxxx" 时从 ID 推断 bvid 再 pagelist
+        if (multi.isEmpty() && recordId.startsWith("video:") && bvid.isNullOrBlank()) {
+            val guessedBvid = recordId.removePrefix("video:")
+            runCatching {
+                val pages = repo.resolveVideo(guessedBvid)?.second.orEmpty()
+                val firstCid = pages.firstOrNull()?.cid ?: 0L
+                if (firstCid > 0L) {
+                    multi.addAll(repo.candidates(guessedBvid, firstCid))
+                }
+            }.onFailure {
+                Log.w(TAG, "[DL] pagelist 回退失败 bvid=$guessedBvid: ${it.message}")
+            }
+        }
+        return multi.distinct()
+    }
+
+    private suspend fun tryDownloadOne(
+        key: String, url: String, fileName: String,
+        bookTitle: String, cover: String,
+        recordId: String, bvid: String?, cid: Long?, auid: Long?, partTitle: String
+    ): Boolean {
+        val cookieHeader = cookieHeader()
         return try {
             val req = Request.Builder().url(url)
                 .header("Referer", "https://www.bilibili.com/")
                 .header("User-Agent", UA)
                 .header("Cookie", cookieHeader)
+                .header("Range", "bytes=0-")  // CDN 返回 206，便于流式下载与失败重试
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val hint = when (resp.code) {
                         403 -> "（需要 SESSDATA 登录态；先在设置里粘登录后的 cookie）"
-                        412 -> "（B 站风控拦截，cookie 不全）"
+                        412 -> "（B 站风控拦截，cookie 不全；请粘贴登录态 cookie）"
                         404 -> "（视频已失效或被删除）"
+                        416 -> "（Range 越界，CDN 不支持分段）"
                         else -> ""
                     }
-                    val msg = "HTTP ${resp.code} $hint"
-                    Log.w(TAG, "[DL] HTTP 失败 key=$key code=${resp.code} url=${url.take(60)}")
-                    _tasks.value = _tasks.value + (key to TaskState.Failed(msg))
-                    ErrorBus.post(message = "下载失败：$msg")
+                    Log.w(TAG, "[DL] HTTP 失败 key=$key code=${resp.code} url=${url.take(80)}")
+                    _tasks.value = _tasks.value + (key to TaskState.Failed("HTTP ${resp.code} $hint"))
+                    if (resp.code == 403 || resp.code == 412) {
+                        ErrorBus.post(message = "下载失败：HTTP ${resp.code} $hint")
+                    }
                     return false
                 }
                 val body = resp.body ?: run {
                     _tasks.value = _tasks.value + (key to TaskState.Failed("空响应体"))
-                    ErrorBus.post(message = "下载失败：空响应体")
                     return false
                 }
-                val total = body.contentLength()
+                val total = body.contentLength().takeIf { it > 0 }
                 val out = File(dir, fileName)
                 body.byteStream().use { ins ->
                     out.outputStream().use { os ->
@@ -153,6 +222,11 @@ class DownloadManager(
                         }
                     }
                 }
+                if (out.length() <= 0L) {
+                    runCatching { out.delete() }
+                    _tasks.value = _tasks.value + (key to TaskState.Failed("响应体为空"))
+                    return false
+                }
                 val item = Item(
                     key = key, bookId = recordId, bookTitle = bookTitle, cover = cover,
                     bvid = bvid, cid = cid, auid = auid,
@@ -166,9 +240,8 @@ class DownloadManager(
                 true
             }
         } catch (e: Exception) {
-            Log.w(TAG, "[DL] 下载失败 key=$key: ${e.message}", e)
+            Log.w(TAG, "[DL] 下载失败 key=$key url=${url.take(80)}: ${e.message}", e)
             _tasks.value = _tasks.value + (key to TaskState.Failed(e.message ?: "网络错误"))
-            ErrorBus.post(message = "下载失败：${e.message ?: "网络错误"}")
             false
         }
     }

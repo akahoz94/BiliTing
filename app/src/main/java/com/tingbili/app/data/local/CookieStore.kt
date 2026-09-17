@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -19,6 +21,12 @@ class CookieStore(private val context: Context) {
     // Preferences DataStore 自带的 corruption handler 会在首次失败后重置文件，下次读取即正常。
     suspend fun buvid3(): String = runCatching { dataStore.data.map { it[keyBuvid3] ?: "" }.first() }.getOrDefault("")
     suspend fun cookieHeader(): String = runCatching { dataStore.data.map { it[keyCookie] ?: "" }.first() }.getOrDefault("")
+
+    /** 响应式订阅当前已保存的 cookie 字符串（坏文件/IO 异常时 emit 空串） */
+    fun cookieFlow(): Flow<String> = dataStore.data
+        .map { it[keyCookie] ?: "" }
+        .catch { emit("") }
+
     suspend fun save(buvid3: String, cookie: String) =
         runCatching { dataStore.edit { it[keyBuvid3] = buvid3; it[keyCookie] = cookie } }
 }

@@ -24,5 +24,7 @@ data class BookRecord(
     val bvid: String? = null,
     val auid: Long? = null,
     val ownerMid: Long = 0L,
-    val ownerAvatar: String = ""
+    val ownerAvatar: String = "",
+    val isFinished: Boolean = false,
+    val sortOrder: Int = 0
 )

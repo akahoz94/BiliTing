@@ -13,35 +13,42 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import com.tingbili.app.ui.components.ModeCard
+import com.tingbili.app.ui.theme.AppTokens
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,21 +60,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tingbili.app.data.local.Defaults
 import com.tingbili.app.ui.theme.ThemePalettes
 
 /**
- * v0.9 重构后的设置页：
- *   - "外观"分组：主题色 / 深浅模式 / 沉浸式策略 / 取色强度（按用户勾掉的 A5 删掉背景淡出时长）
- *   - "播放"分组只剩全局开关：仅音频 / 自动下一集 / 按 UP 主记忆倍速
- *     （默认倍速、播完停止、进度保留已搬到播放页 ⚙ 抽屉）
- *   - "数据"分组：搜索 / 统计 / WebDAV
+ * 设置页 —— 第一版设计语言（与听单/搜索/历史统一）：
+ *   - 衬线字（Noto Serif SC）
+ *   - 28sp Serif Bold AppBar 标题
+ *   - 卡片：16dp 圆角 surfaceContainer 卡 + 1dp outlineVariant 边框
+ *   - 列表项：16dp 内边距 + 双行（标题 Semibold + 副标题 onSurfaceVariant）
+ *   - 主题色：6 个圆点 + onSurface 边框指示激活态
+ *   - 段控：12dp 圆角分段，primary 高亮
+ *   - 0 emoji
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,75 +102,84 @@ fun SettingsScreen(
     val msg by viewModel.msg.collectAsState()
 
     var showWebDav by remember { mutableStateOf(false) }
+    var showCookie by remember { mutableStateOf(false) }
+    val cookieHeader by viewModel.cookieHeader.collectAsState()
+    val hasSessdata = cookieHeader.contains("SESSDATA=", ignoreCase = true) ||
+        cookieHeader.contains("sessdata=", ignoreCase = true)
 
-    Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text("设置") }) }) { padding ->
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surface,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "设置",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 28.sp
+                        )
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // ============= 外观 =============
+            // ============ 外观 ============
             item {
-                GroupHeader("外观", Icons.Filled.Palette)
-                Card {
-                    Column {
-                        SettingRow(
-                            title = "主题色",
-                            subtitle = themeColorName(themeColor) + " · 影响按钮 / 胶囊 / Tab"
-                        ) {
-                            // 紧凑 trailing：6 个小圆点排成一行，文字在上方独占完整宽度
-                            ColorSwatches(selected = themeColor, onSelect = viewModel::setThemeColor)
-                        }
-                        Divider()
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Text(
-                                "深浅模式",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            SegmentedRow(
-                                options = listOf(0 to "跟随系统", 1 to "浅色", 2 to "深色"),
-                                selected = theme,
-                                onSelect = viewModel::setTheme
-                            )
-                        }
-                        Divider()
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Text(
-                                "播放页沉浸式",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            SegmentedRow(
-                                options = listOf(0 to "封面取色", 1 to "主题色", 2 to "极简"),
-                                selected = immersiveMode,
-                                onSelect = viewModel::setImmersiveMode
-                            )
-                            if (immersiveMode == 0) {
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    "取色强度 ${paletteStrength}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Slider(
-                                    value = paletteStrength.toFloat(),
-                                    onValueChange = { viewModel.setPaletteStrength(it.toInt()) },
-                                    valueRange = 0f..100f,
-                                    steps = 9
-                                )
-                            }
-                        }
+                SectionHeader("外观", Icons.Filled.Palette)
+                ModeCard(
+                    title = "主题色",
+                    subtitle = "${themeColorName(themeColor)} · 影响按钮 / 胶囊 / Tab"
+                ) {
+                    ColorSwatches(selected = themeColor, onSelect = viewModel::setThemeColor)
+                }
+                Spacer(Modifier.height(AppTokens.Spacing3))
+                ModeCard(title = "深浅模式") {
+                    SegmentedRow(
+                        options = listOf(0 to "跟随系统", 1 to "浅色", 2 to "深色"),
+                        selected = theme,
+                        onSelect = viewModel::setTheme
+                    )
+                }
+                Spacer(Modifier.height(AppTokens.Spacing3))
+                ModeCard(title = "播放页沉浸式") {
+                    SegmentedRow(
+                        options = listOf(0 to "封面取色", 1 to "主题色", 2 to "极简"),
+                        selected = immersiveMode,
+                        onSelect = viewModel::setImmersiveMode
+                    )
+                    if (immersiveMode == 0) {
+                        Spacer(Modifier.height(AppTokens.Spacing3))
+                        Text(
+                            "取色强度 ${paletteStrength}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Serif
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = paletteStrength.toFloat(),
+                            onValueChange = { viewModel.setPaletteStrength(it.toInt()) },
+                            valueRange = 0f..100f,
+                            steps = 9
+                        )
                     }
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(AppTokens.Spacing5))
             }
 
-            // ============= 播放 =============
+            // ============ 播放 ============
             item {
-                GroupHeader("播放", Icons.Filled.PlayCircle)
-                Card {
+                SectionHeader("播放", Icons.Filled.PlayCircle)
+                SettingsCard {
                     Column {
                         SwitchRow(
                             title = "仅音频模式",
@@ -169,7 +190,7 @@ fun SettingsScreen(
                         Divider()
                         SwitchRow(
                             title = "播完本集自动下一集",
-                            subtitle = "开启后到末尾自动翻下一P，无需手动点 ⏭",
+                            subtitle = "开启后到末尾自动翻下一P，无需手动点",
                             checked = autoNext,
                             onCheckedChange = viewModel::setAutoNextEnabled
                         )
@@ -185,29 +206,39 @@ fun SettingsScreen(
                 Spacer(Modifier.height(20.dp))
             }
 
-            // ============= 数据 =============
+            // ============ 数据 ============
             item {
-                GroupHeader("数据", Icons.Filled.Storage)
-                Card {
+                SectionHeader("数据", Icons.Filled.Storage)
+                SettingsCard {
                     Column {
                         NavRow(
-                            icon = Icons.Filled.Tune,
+                            icon = Icons.Filled.GraphicEq,
                             title = "听书统计",
-                            subtitle = "累计时长 / 本月新增 / TOP 3",
+                            subtitle = "累计时长 / 本月新增 / 收藏概览",
                             onClick = onOpenStats
                         )
                         Divider()
                         NavRow(
-                            icon = Icons.Filled.Download,
+                            icon = Icons.Filled.Image,
                             title = "下载管理",
                             subtitle = "离线缓存的分集，可播放 / 删除",
                             onClick = onOpenDownloads
                         )
                         Divider()
                         NavRow(
-                            icon = Icons.Filled.NightsStay,
+                            icon = Icons.Filled.Key,
+                            title = if (hasSessdata) "修改 B 站登录 cookie" else "粘贴 B 站登录 cookie",
+                            subtitle = if (hasSessdata)
+                                "已登录 · SESSDATA 已保存"
+                            else
+                                "未登录 · 必填才能稳定下载 / 播放高画质",
+                            onClick = { showCookie = true }
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.Cloud,
                             title = if (webdavUrl.isBlank()) "配置 WebDAV 备份" else "修改 WebDAV",
-                            subtitle = "本地 AES-GCM 加密 · 兼容坚果云 / Nextcloud / 自建",
+                            subtitle = "本地 AES-GCM 加密 · 兼容坚果云 / Nextcloud",
                             onClick = { showWebDav = true }
                         )
                     }
@@ -232,6 +263,16 @@ fun SettingsScreen(
         )
     }
 
+    if (showCookie) {
+        CookieDialog(
+            initial = cookieHeader,
+            busy = busy,
+            onDismiss = { showCookie = false },
+            onSave = viewModel::setCookie,
+            onClear = viewModel::clearCookie
+        )
+    }
+
     msg?.let { m ->
         AlertDialog(
             onDismissRequest = viewModel::consumeMsg,
@@ -242,11 +283,14 @@ fun SettingsScreen(
     }
 }
 
-// ============== 通用小组件 ==============
+// ============== 通用小组件（设计语言统一） ==============
 
 @Composable
-private fun GroupHeader(label: String, icon: ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)) {
+private fun SectionHeader(label: String, icon: ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+    ) {
         Icon(
             icon, contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
@@ -255,19 +299,21 @@ private fun GroupHeader(label: String, icon: ImageVector) {
         Spacer(Modifier.width(6.dp))
         Text(
             label,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.SemiBold
+            ),
             color = MaterialTheme.colorScheme.primary
         )
     }
 }
 
 @Composable
-private fun Card(content: @Composable () -> Unit) {
+private fun SettingsCard(content: @Composable () -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = Modifier.fillMaxWidth()
     ) { Column { content() } }
 }
@@ -276,77 +322,8 @@ private fun Card(content: @Composable () -> Unit) {
 private fun Divider() {
     androidx.compose.material3.HorizontalDivider(
         thickness = 1.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
     )
-}
-
-@Composable
-private fun SettingRow(
-    title: String,
-    subtitle: String? = null,
-    trailing: @Composable (() -> Unit)? = null
-) {
-    if (trailing == null) {
-        // 无 trailing：保持单 Row 紧凑样式
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-                if (!subtitle.isNullOrBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    } else {
-        // 有 trailing：标题独占第一行，副标题和 trailing 共享第二行（trailing 在右）
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!subtitle.isNullOrBlank()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                trailing()
-            }
-        }
-    }
 }
 
 @Composable
@@ -359,15 +336,24 @@ private fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(Modifier.height(2.dp))
             Text(
                 subtitle,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Serif
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -393,18 +379,39 @@ private fun NavRow(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+            Icon(
+                icon, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(20.dp)
+            )
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(Modifier.height(2.dp))
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Serif
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -427,20 +434,18 @@ private fun ColorSwatches(selected: Int, onSelect: (Int) -> Unit) {
         Defaults.COLOR_PINK to "粉",
         Defaults.COLOR_RED to "红"
     )
-    // 紧凑横向排列：每个圆点 28/32dp + 8dp 间距。6 个 ≈ 6*32 + 5*8 ≈ 232dp，
-    // 留给副标题文字 ≈ 80dp（够 4 个字 + 省略号）。不再 fillMaxWidth+SpaceBetween。
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         swatches.forEach { entry ->
             val id: Int = entry.first
             val previewColor = ThemePalettes.schemeOf(id, false).primary
             val isOn = id == selected
             Box(
                 Modifier
-                    .size(if (isOn) 32.dp else 26.dp)
+                    .size(if (isOn) 36.dp else 30.dp)
                     .clip(CircleShape)
                     .background(previewColor)
                     .border(
-                        width = if (isOn) 2.dp else 1.dp,
+                        width = if (isOn) 2.5.dp else 1.dp,
                         color = if (isOn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
                         shape = CircleShape
                     )
@@ -475,7 +480,9 @@ private fun SegmentedRow(
                 ) {
                     Text(
                         label,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Serif
+                        ),
                         fontWeight = if (isOn) FontWeight.SemiBold else FontWeight.Normal,
                         color = if (isOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                     )
@@ -504,7 +511,15 @@ private fun WebDavDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("WebDAV 备份") },
+        title = {
+            Text(
+                "WebDAV 备份",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        },
         text = {
             Column {
                 OutlinedTextField(
@@ -531,8 +546,10 @@ private fun WebDavDialog(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "说明：URL 与用户名立即保存到本机；密码以密文保存。备份/恢复时用密码派生 AES-256 密钥，云端只看到密文。",
-                    style = MaterialTheme.typography.bodySmall,
+                    "URL 与用户名立即保存到本机；密码以密文保存。备份/恢复时用密码派生 AES-256 密钥，云端只看到密文。",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Serif
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -553,6 +570,84 @@ private fun WebDavDialog(
                     onClick = { if (!busy) onRestore(pass) },
                     enabled = !busy && pass.isNotBlank()
                 ) { Text("恢复") }
+            }
+        }
+    )
+}
+
+/**
+ * 粘贴 B 站登录 cookie 的对话框：
+ *  - 多行输入框，直接粘整段 cookie
+ *  - 提供"清空"按钮退回匿名
+ *  - 仅做"是否含 SESSDATA"的轻校验，避免误存空白
+ */
+@Composable
+private fun CookieDialog(
+    initial: String,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var text by remember { mutableStateOf(initial) }
+    val hasSessdata = text.contains("SESSDATA=", ignoreCase = true) ||
+        text.contains("sessdata=", ignoreCase = true)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "B 站登录 cookie",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    "从浏览器打开 bilibili.com → F12 → Network → 任一请求 → Cookie，复制整段粘贴到下面。",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Serif
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("cookie 字符串") },
+                    placeholder = { Text("SESSDATA=xxxx; bili_jct=xxxx; ...") },
+                    singleLine = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp, max = 220.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (hasSessdata) "已识别到 SESSDATA" else "未检测到 SESSDATA，保存后下载仍可能受限",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Serif
+                    ),
+                    color = if (hasSessdata) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (!busy) onSave(text) },
+                enabled = !busy && text.isNotBlank()
+            ) { Text(if (busy) "保存中..." else "保存") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onClear, enabled = !busy) { Text("清空") }
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onDismiss) { Text("关闭") }
             }
         }
     )

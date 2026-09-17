@@ -271,6 +271,12 @@ class PlayerHolder(
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
     fun seekTo(ms: Long) = player.seekTo(ms)
     fun pause() = player.pause()
+    /** 当前是否在播放（用于听单迷你播放器图标联动） */
+    fun isPlaying(): Boolean = runCatching { player.isPlaying }.getOrDefault(false)
+    /** 切换播放/暂停（用于迷你播放器圆形按钮点击） */
+    fun togglePlayPause() {
+        if (player.isPlaying) player.pause() else player.play()
+    }
     /** 音量 0..1，用于睡眠渐弱淡出 */
     fun setVolume(v: Float) { player.volume = v.coerceIn(0f, 1f) }
 }

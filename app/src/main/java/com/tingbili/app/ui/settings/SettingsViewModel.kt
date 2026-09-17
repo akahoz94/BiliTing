@@ -7,16 +7,19 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.backup.WebDavBackup
+import com.tingbili.app.data.local.CookieStore
 import com.tingbili.app.data.local.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val store: SettingsStore,
+    private val cookieStore: CookieStore,
     private val app: BiliTingApplication
 ) : ViewModel() {
     val themeMode: StateFlow<Int> = store.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -32,6 +35,8 @@ class SettingsViewModel(
     val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 60)
     val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val cookieHeader: StateFlow<String> = cookieStore.cookieFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -61,6 +66,32 @@ class SettingsViewModel(
     fun setPaletteStrength(v: Int) = viewModelScope.launch { store.setPaletteStrength(v) }
     fun setAutoNextEnabled(v: Boolean) = viewModelScope.launch { store.setAutoNextEnabled(v) }
     fun setRememberSpeedPerAuthor(v: Boolean) = viewModelScope.launch { store.setRememberSpeedPerAuthor(v) }
+
+    /** 保存 B 站登录 cookie（用户从浏览器复制粘贴的整段 cookie 字符串） */
+    fun setCookie(raw: String) {
+        val cleaned = raw.trim()
+        if (cleaned.isBlank()) {
+            _msg.value = "cookie 不能为空"; return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            val buvid3 = runCatching { cookieStore.buvid3() }.getOrDefault("")
+            val r = runCatching { cookieStore.save(buvid3, cleaned) }
+            _busy.value = false
+            _msg.value = if (r.isSuccess) "已保存，下次启动生效" else "保存失败：${r.exceptionOrNull()?.message}"
+        }
+    }
+
+    /** 清空已保存的 cookie（退回匿名访问） */
+    fun clearCookie() {
+        _busy.value = true
+        viewModelScope.launch {
+            val buvid3 = runCatching { cookieStore.buvid3() }.getOrDefault("")
+            runCatching { cookieStore.save(buvid3, "") }
+            _busy.value = false
+            _msg.value = "已清空 cookie"
+        }
+    }
 
     /** WebDAV 备份到云端；返回结果会推到 msg 中 */
     fun webdavBackup(pass: String) {
@@ -116,7 +147,7 @@ class SettingsViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as BiliTingApplication
-                SettingsViewModel(app.container.settingsStore, app)
+                SettingsViewModel(app.container.settingsStore, app.container.cookieStore, app)
             }
         }
     }

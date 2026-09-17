@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -14,8 +14,8 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "0.14.2"
+        versionCode = 27
+        versionName = "0.17.0"
     }
 
     // debug keystore：保证 release 也用同一份密钥，方便侧载且升级时签名一致

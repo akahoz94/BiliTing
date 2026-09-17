@@ -19,6 +19,9 @@ class HistoryViewModel(private val dao: BookRecordDao) : ViewModel() {
 
     fun clear() = viewModelScope.launch { dao.clearAll() }
 
+    /** 删除单条历史（数据库里彻底删，不影响听单收藏） */
+    fun delete(id: String) = viewModelScope.launch { dao.delete(id) }
+
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

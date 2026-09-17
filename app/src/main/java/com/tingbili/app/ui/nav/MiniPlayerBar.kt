@@ -18,9 +18,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -28,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,6 +42,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,17 +76,22 @@ fun MiniPlayerBar(
     val scope = rememberCoroutineScope()
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showParts by remember { mutableStateOf(false) }
-    var queueIdx by remember { mutableStateOf(holder.currentQueueIndex()) }
-    var queue by remember { mutableStateOf<List<PartItem>>(holder.currentQueue()) }
 
     var isPlaying by remember { mutableStateOf(holder.player.isPlaying) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            isPlaying = holder.player.isPlaying
-            queueIdx = holder.currentQueueIndex()
-            queue = holder.currentQueue()
-            delay(500)
+    var queueIdx by remember { mutableStateOf(holder.currentQueueIndex()) }
+    var queue by remember { mutableStateOf(holder.currentQueue()) }
+
+    // 用 ExoPlayer.Listener 替代每 500ms 忙等轮询：播放状态/队列变化时由播放器回调
+    DisposableEffect(Unit) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                queueIdx = holder.currentQueueIndex()
+                queue = holder.currentQueue()
+            }
         }
+        holder.player.addListener(listener)
+        onDispose { holder.player.removeListener(listener) }
     }
 
     val launcher = BiliTingApplication.get()?.container?.playerLauncher
@@ -151,7 +165,7 @@ fun MiniPlayerBar(
                 onClick = { scope.launch { launcher?.prevPart() } },
                 modifier = Modifier.size(40.dp)
             ) {
-                Text("⏮", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Icon(Icons.Filled.SkipPrevious, contentDescription = "上一集", tint = MaterialTheme.colorScheme.onSurface)
             }
             FilledIconButton(
                 onClick = { holder.togglePlay() },
@@ -159,17 +173,17 @@ fun MiniPlayerBar(
                     .size(40.dp)
                     .clip(RoundedCornerShape(20.dp))
             ) {
-                Text(
-                    if (isPlaying) "⏸" else "▶",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimary
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "暂停" else "播放",
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
             IconButton(
                 onClick = { scope.launch { launcher?.nextPart() } },
                 modifier = Modifier.size(40.dp)
             ) {
-                Text("⏭", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Icon(Icons.Filled.SkipNext, contentDescription = "下一集", tint = MaterialTheme.colorScheme.onSurface)
             }
         }
     }

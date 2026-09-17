@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [BookRecord::class], version = 5, exportSchema = false)
+@Database(entities = [BookRecord::class], version = 6, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookRecordDao(): BookRecordDao
 
@@ -19,7 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext, AppDatabase::class.java, "bili_ting.db"
                 )
                     // 先 migrations 升级；万一迁移异常时直接重建（会丢本地历史/收藏，先保证能打开）。
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }
@@ -50,6 +50,14 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book_records ADD COLUMN speed REAL NOT NULL DEFAULT 1.0")
+            }
+        }
+
+        /** v5 → v6：听单归档（isFinished）+ 手动排序（sortOrder） */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_records ADD COLUMN isFinished INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE book_records ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

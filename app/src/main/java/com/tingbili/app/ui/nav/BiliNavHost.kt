@@ -103,6 +103,29 @@ fun BiliNavHost() {
         navController.navigate("player")
     }
 
+    /** 搜索结果加入听单：建占位记录并标收藏，不打断当前播放 */
+    fun favoriteSearchItem(item: SearchItem) {
+        scope.launch {
+            val cover = if (item.cover.isNotBlank()) item.cover else item.pic
+            val id = if (item.type == "audio" || item.bvid.isBlank()) "audio:" else "video:"
+            val record = BookRecord(
+                id = id,
+                title = com.tingbili.app.data.repo.SearchRepository.stripHtml(item.title),
+                owner = item.author,
+                type = if (item.type == "audio") "audio" else "video",
+                cover = cover,
+                bvid = item.bvid.ifBlank { null },
+                auid = item.aid,
+                ownerMid = item.uid,
+                ownerAvatar = item.upic,
+                isFavorite = true,
+                favoriteAt = System.currentTimeMillis()
+            )
+            container.libraryRepo.recordPlayed(record)
+            container.libraryRepo.toggleFavorite(id, true)
+        }
+    }
+
     fun openAuthor(mid: Long, name: String, avatar: String) {
         // 名字/头像含 / : ? 等特殊字符，必须 URL 编码后再塞进路径路由
         navController.navigate("author/$mid/${Uri.encode(name)}/${Uri.encode(avatar)}")
@@ -153,6 +176,7 @@ fun BiliNavHost() {
                 SearchScreen(
                     onOpenPlayer = ::playAndNavigate,
                     onOpenAuthor = ::openAuthor,
+                    onFavorite = ::favoriteSearchItem,
                     modifier = Modifier.padding(padding)
                 )
             }

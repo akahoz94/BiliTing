@@ -43,6 +43,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -375,37 +376,37 @@ fun PlayerScreen(
         )
     }
 
-    // 倍速弹窗
+    // 倍速弹窗：滑杆连续调节 0.5–3.0，附常用档位快捷选择
     if (showSpeed) {
-        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        var sliderPos by remember(s.speed) { mutableFloatStateOf(s.speed.coerceIn(0.5f, 3f)) }
         AlertDialog(
             onDismissRequest = { showSpeed = false },
             title = { Text("播放倍速") },
             text = {
                 Column {
-                    speeds.forEach { v ->
-                        val selected = v == s.speed
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.setSpeed(v); showSpeed = false }
-                                .padding(vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "${v}x",
-                                style = if (selected) MaterialTheme.typography.titleMedium
-                                        else MaterialTheme.typography.bodyLarge,
-                                color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurface
-                            )
-                            if (selected) {
-                                Text(
-                                    "当前",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                    Text(
+                        "%.2fx".format(sliderPos),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Slider(
+                        value = sliderPos,
+                        onValueChange = { sliderPos = it; viewModel.setSpeed(it) },
+                        valueRange = 0.5f..3.0f,
+                        steps = 49,  // 步长 0.05
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    val presets = listOf(0.8f, 1.0f, 1.25f, 1.5f, 2.0f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        presets.forEach { v ->
+                            TextButton(onClick = { sliderPos = v; viewModel.setSpeed(v) }) {
+                                Text("${v}x")
                             }
                         }
                     }

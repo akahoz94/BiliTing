@@ -20,6 +20,7 @@ import com.tingbili.app.data.repo.PlayRepository
 import com.tingbili.app.data.repo.SearchRepository
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
+import com.tingbili.app.util.AppImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,7 +43,10 @@ class BiliTingApplication : Application() {
         super.onCreate()
         _instance = this
         installCrashHandler()
-        Log.i(TAG_BANNER, "=== BiliTing v0.10.3-debug (crash handler installed) ===")
+        Log.i(TAG_BANNER, "=== BiliTing v0.16.0-debug (unified UI tokens + shared components) ===")
+        // 初始化 Coil 全局 ImageLoader（带 UA/Referer，CoverUtil 失效兜底）
+        runCatching { AppImageLoader.get(this) }
+            .onFailure { Log.e(TAG_BANNER, "AppImageLoader 初始化失败", it) }
         try {
             appDatabase = AppDatabase.get(this)
             Log.i(TAG_BANNER, "AppDatabase open ok: version=${appDatabase.openHelper.readableDatabase.version}")
@@ -122,26 +126,27 @@ class BiliTingApplication : Application() {
  * 避免引入 DI 框架。API/仓库实例全局唯一，跨屏幕共享。
  */
 class AppContainer(val app: BiliTingApplication) {
-    val biliService: BiliApiService = run {
-        // B站风控要求匿名请求携带 buvid3：启动时读一次，没有则生成并持久化。
-        // runBlocking 被压在主线程 onCreate 内，DataStore 读写在文件损坏/异常时会抛异常，
-        // 若不兜底会直接拖垮整个启动（进 App 即闪退）。任何失败都退回临时值，绝不阻断启动。
-        val buvid3 = runCatching {
-            runBlocking {
-                var v = app.cookieStore.buvid3()
-                if (v.isBlank()) {
-                    v = WbiSigner.randomBuvid3()
-                    app.cookieStore.save(v, "")
-                }
-                v
+    // B站风控要求匿名请求携带 buvid3：启动时读一次，没有则生成并持久化。
+    // runBlocking 被压在主线程 onCreate 内，DataStore 读写在文件损坏/异常时会抛异常，
+    // 若不兜底会直接拖垮整个启动（进 App 即闪退）。任何失败都退回临时值，绝不阻断启动。
+    private val buvid3: String = runCatching {
+        runBlocking {
+            var v = app.cookieStore.buvid3()
+            if (v.isBlank()) {
+                v = WbiSigner.randomBuvid3()
+                app.cookieStore.save(v, "")
             }
-        }.getOrElse { e ->
-            Log.w("AppContainer", "buvid3 初始化失败，改用手头临时值继续启动", e)
-            WbiSigner.randomBuvid3()
+            v
         }
-        val cookie = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
-        buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
+    }.getOrElse { e ->
+        Log.w("AppContainer", "buvid3 初始化失败，改用手头临时值继续启动", e)
+        WbiSigner.randomBuvid3()
     }
+    // 启动时默认 cookie（仅含 buvid3 系列），用户后续在设置页粘贴的完整 cookie 由
+    // biliService / downloadManager 在请求时通过全局拦截器按需补齐。
+    val cookie: String = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+
+    val biliService: BiliApiService = buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
     private val wbiKeys = WbiKeyStore(biliService)
 
     val searchApi = SearchApi(biliService, wbiKeys)
@@ -149,7 +154,9 @@ class AppContainer(val app: BiliTingApplication) {
     val authorApi = AuthorApi(biliService, wbiKeys)
     val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService)
     val downloadManager: com.tingbili.app.download.DownloadManager = runCatching {
-        com.tingbili.app.download.DownloadManager(app, playRepo, app.cookieStore)
+        // 复用 biliService 用的 OkHttpClient（已带 UA/Referer/Cookie 全局拦截器）
+        val client = buildHttpClient(cookie)
+        com.tingbili.app.download.DownloadManager(app, playRepo, app.cookieStore, client)
     }.getOrElse { e ->
         Log.e("AppContainer", "DownloadManager 初始化失败，使用空壳兜底", e)
         com.tingbili.app.download.DownloadManager.empty(app)

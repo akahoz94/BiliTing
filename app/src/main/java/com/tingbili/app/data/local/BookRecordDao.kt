@@ -12,7 +12,7 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("SELECT * FROM book_records ORDER BY lastPlayedAt DESC")
     fun observeHistory(): Flow<List<BookRecord>>
 
-    @Query("SELECT * FROM book_records WHERE isFavorite = 1 ORDER BY favoriteAt DESC")
+    @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 0 ORDER BY sortOrder ASC, favoriteAt DESC")
     fun observeFavorites(): Flow<List<BookRecord>>
 
     // LibraryRepository.Dao 继承的方法需在此带 Room 注解重新声明（override），
@@ -35,6 +35,15 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("DELETE FROM book_records WHERE id = :id")
     suspend fun delete(id: String)
 
+
+    @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 1 ORDER BY favoriteAt DESC")
+    fun observeArchivedFavorites(): Flow<List<BookRecord>>
+
+    @Query("UPDATE book_records SET isFinished = :finished WHERE id = :id")
+    suspend fun setFinished(id: String, finished: Boolean)
+
+    @Query("UPDATE book_records SET sortOrder = :order WHERE id = :id")
+    suspend fun setSortOrder(id: String, order: Int)
     @Query("DELETE FROM book_records")
     suspend fun clearAll()
 }
