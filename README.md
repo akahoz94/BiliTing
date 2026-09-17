@@ -4,6 +4,12 @@ B 站听书 Android 客户端。
 
 [📦 下载 APK](../../releases/latest)
 
+## 截图
+
+| 搜索 | 播放 | UP 主主页 | 书架 |
+| :---: | :---: | :---: | :---: |
+| ![搜索](docs/screenshots/search.jpg) | ![播放](docs/screenshots/player.jpg) | ![UP主主页](docs/screenshots/author.jpg) | ![书架](docs/screenshots/shelf.jpg) |
+
 ## 功能
 
 - 搜索 + 播放
