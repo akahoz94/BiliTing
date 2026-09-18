@@ -70,8 +70,6 @@ fun BiliNavHost() {
         container.playerLauncher
     }
 
-    // 订阅全局错误总线：任意 ViewModel/Repository 抛出异常都可以 ErrorBus.post()，
-    // Snackbar 会自动弹出；带 retry 的 error 会附带"重试"按钮。
     LaunchedEffect(Unit) {
         ErrorBus.errors.collect { err ->
             scope.launch {
@@ -88,9 +86,7 @@ fun BiliNavHost() {
         }
     }
 
-    // 是否为 tab 主页面（显示底部栏；播放页/作者页为全屏，不显示底部栏也不显示迷你条）
     val isTab = Tab.entries.any { it.route == currentRoute }
-    // 隐藏系统底部导航的全屏页（播放页、作者主页）
     val isFullscreen = currentRoute == "player" || currentRoute?.contains("author") == true
 
     fun playAndNavigate(item: SearchItem) {
@@ -103,7 +99,6 @@ fun BiliNavHost() {
         navController.navigate("player")
     }
 
-    /** 搜索结果加入听单：建占位记录并标收藏，不打断当前播放 */
     fun favoriteSearchItem(item: SearchItem) {
         scope.launch {
             val cover = if (item.cover.isNotBlank()) item.cover else item.pic
@@ -127,17 +122,15 @@ fun BiliNavHost() {
     }
 
     fun openAuthor(mid: Long, name: String, avatar: String) {
-        // 名字/头像含 / : ? 等特殊字符，必须 URL 编码后再塞进路径路由
+        val safeName = name.ifBlank { "未知UP" }
         val safeAvatar = avatar.ifBlank { "none" }
-        navController.navigate("author/$mid/${Uri.encode(name)}/${Uri.encode(safeAvatar)}")
-
+        navController.navigate("author?mid=$mid&name=${Uri.encode(safeName)}&avatar=${Uri.encode(safeAvatar)}")
     }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (isTab) {
                 Column {
-                    // 迷你播放条置于底部导航上方
                     MiniPlayerBar(
                         holder = container.playerHolder,
                         onOpenPlayer = { navController.navigate("player") }
@@ -170,6 +163,13 @@ fun BiliNavHost() {
             composable(Tab.Playlist.route) {
                 PlaylistScreen(
                     onOpenPlayer = ::resumeAndNavigate,
+                    onOpenSearch = {
+                        navController.navigate(Tab.Search.route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -201,7 +201,7 @@ fun BiliNavHost() {
                     onOpenAuthor = { mid, name, avatar -> openAuthor(mid, name, avatar) }
                 )
             }
-            composable("author/{mid}/{name}/{avatar}") { entry ->
+            composable("author?mid={mid}&name={name}&avatar={avatar}") { entry ->
                 val mid = entry.arguments?.getString("mid")?.toLongOrNull() ?: 0L
                 val name = entry.arguments?.getString("name").orEmpty()
                 val avatar = entry.arguments?.getString("avatar").orEmpty()
