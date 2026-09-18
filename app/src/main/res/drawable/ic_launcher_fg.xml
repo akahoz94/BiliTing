@@ -4,45 +4,30 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 耳机头梁 - 居中偏上 -->
+    <!-- 耳机 - 简约现代风格 -->
+    <!-- 头梁 -->
     <path
-        android:pathData="M 32,46 C 32,24 76,24 76,46"
+        android:pathData="M 54,30 C 38,30 28,42 28,56"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="6"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M 54,30 C 70,30 80,42 80,56"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <!-- 左耳罩 -->
     <path
-        android:pathData="M 28,44 a 7,7 0 0 1 7,-7 h 2 a 7,7 0 0 1 7,7 v 16 a 7,7 0 0 1 -7,7 h -2 a 7,7 0 0 1 -7,-7 z"
+        android:pathData="M 22,56 a 8,8 0 0 1 8,-8 h 1 a 8,8 0 0 1 8,8 v 14 a 8,8 0 0 1 -8,8 h -1 a 8,8 0 0 1 -8,-8 z"
         android:fillColor="#FFFFFF" />
     <!-- 右耳罩 -->
     <path
-        android:pathData="M 64,44 a 7,7 0 0 1 7,-7 h 2 a 7,7 0 0 1 7,7 v 16 a 7,7 0 0 1 -7,7 h -2 a 7,7 0 0 1 -7,-7 z"
+        android:pathData="M 69,56 a 8,8 0 0 1 8,-8 h 1 a 8,8 0 0 1 8,8 v 14 a 8,8 0 0 1 -8,8 h -1 a 8,8 0 0 1 -8,-8 z"
         android:fillColor="#FFFFFF" />
-    <!-- 均衡器波形 - 耳机下方，细短，不挤 -->
+    <!-- 播放三角 - 嵌在中间，简洁 -->
     <path
-        android:pathData="M 46,82 L 46,88"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 50,79 L 50,88"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 54,77 L 54,88"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 58,80 L 58,88"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 62,83 L 62,88"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round" />
+        android:pathData="M 49,58 L 49,72 L 62,65 z"
+        android:fillColor="#FB7299" />
 </vector>
