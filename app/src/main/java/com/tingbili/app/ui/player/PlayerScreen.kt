@@ -67,16 +67,6 @@ import com.tingbili.app.util.CoverUtil
 import com.tingbili.app.util.FormatUtil
 import kotlinx.coroutines.launch
 
-/**
- * 播放页（主题色沉浸 + 完整换肤）。
- *
- * 布局借鉴喜马拉雅 / 小宇宙 等成熟听书 App：
- *   顶栏返回 + 收藏 →
- *   中央大封面 →
- *   标题/副标题紧贴封面下沿 →
- *   进度条 + 当前/总时长 →
- *   大播放按钮 + 倍速/定时/选集 横排
- */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
@@ -90,12 +80,13 @@ fun PlayerScreen(
     val record = s.record
     if (record == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("还没有播放内容", color = MaterialTheme.colorScheme.outline)
+            androidx.compose.material3.CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.primary
+            )
         }
         return
     }
 
-    // 沉浸式背景：通过 CoverColorBackground 渲染三策略（封面取色 / 主题色 / 极简）
     val context = androidx.compose.ui.platform.LocalContext.current
     val settingsStore = (context.applicationContext as com.tingbili.app.BiliTingApplication).settingsStore
     val downloadManager = (context.applicationContext as BiliTingApplication).container.downloadManager
@@ -123,7 +114,6 @@ fun PlayerScreen(
         settings = settingsStore
     ) { palette, contentColor ->
         Column(Modifier.fillMaxSize()) {
-            // ===== 顶部：返回 + 收藏 + ⚙ =====
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -156,7 +146,6 @@ fun PlayerScreen(
                 }
             }
 
-            // ===== 中央：封面（自适应屏幕高度，避免与下方紧贴的标题隔太远）=====
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -212,7 +201,6 @@ fun PlayerScreen(
                 }
             }
 
-            // ===== 标题/副标题 紧贴封面下沿 =====
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -266,10 +254,14 @@ fun PlayerScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ===== 进度条 + 时间码 =====
+            var draggingValue by remember { mutableStateOf<Float?>(null) }
             Slider(
-                value = s.positionMs.coerceIn(0, s.durationMs.coerceAtLeast(1)).toFloat(),
-                onValueChange = { viewModel.seekTo(it.toLong()) },
+                value = draggingValue ?: s.positionMs.coerceIn(0, s.durationMs.coerceAtLeast(1)).toFloat(),
+                onValueChange = { draggingValue = it },
+                onValueChangeFinished = {
+                    draggingValue?.let { viewModel.seekTo(it.toLong()) }
+                    draggingValue = null
+                },
                 valueRange = 0f..s.durationMs.coerceAtLeast(1).toFloat(),
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
@@ -287,7 +279,6 @@ fun PlayerScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // ===== 大播放按钮 + 上/下一集 =====
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
@@ -311,7 +302,6 @@ fun PlayerScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // ===== 倍速 / 定时 / 选集 =====
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -366,7 +356,6 @@ fun PlayerScreen(
         }
     }
 
-    // ===== 播放设置抽屉 =====
     if (showSettings) {
         PlayerSettingsSheet(
             settings = settingsStore,
@@ -376,7 +365,6 @@ fun PlayerScreen(
         )
     }
 
-    // 倍速弹窗：滑杆连续调节 0.5–3.0，附常用档位快捷选择
     if (showSpeed) {
         var sliderPos by remember(s.speed) { mutableFloatStateOf(s.speed.coerceIn(0.5f, 3f)) }
         AlertDialog(
@@ -393,7 +381,7 @@ fun PlayerScreen(
                         value = sliderPos,
                         onValueChange = { sliderPos = it; viewModel.setSpeed(it) },
                         valueRange = 0.5f..3.0f,
-                        steps = 49,  // 步长 0.05
+                        steps = 49,
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary
@@ -416,7 +404,6 @@ fun PlayerScreen(
         )
     }
 
-    // 定时弹窗
     if (showSleep) {
         AlertDialog(
             onDismissRequest = { showSleep = false },
@@ -462,7 +449,6 @@ fun PlayerScreen(
         )
     }
 
-    // 选集弹窗
     if (showParts) {
         val parts: List<PartItem> = s.queue
         ModalBottomSheet(
