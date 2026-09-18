@@ -26,5 +26,6 @@ data class BookRecord(
     val ownerMid: Long = 0L,
     val ownerAvatar: String = "",
     val isFinished: Boolean = false,
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    val tag: String = ""
 )

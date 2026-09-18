@@ -39,7 +39,7 @@ class PlayerHolder(
     val player: ExoPlayer
         get() = _player ?: ensurePlayer()
 
-    private fun ensurePlayer(): ExoPlayer {
+    fun ensurePlayer(): ExoPlayer {
         if (_player != null) return _player!!
         synchronized(this) {
             if (_player != null) return _player!!

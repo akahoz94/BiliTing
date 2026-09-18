@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -20,11 +21,26 @@ class PlaylistViewModel(
     private val dao: BookRecordDao,
     private val settings: SettingsStore
 ) : ViewModel() {
-    val favorites: StateFlow<List<BookRecord>> = dao.observeFavorites()
+
+    private val _selectedTag = MutableStateFlow("")
+    val selectedTag: StateFlow<String> = _selectedTag
+
+    val tags: StateFlow<List<String>> = dao.observeDistinctTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val favorites: StateFlow<List<BookRecord>> = _selectedTag.flatMapLatest { tag ->
+        if (tag.isBlank()) dao.observeFavorites() else dao.observeFavoritesByTag(tag)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val archivedFavorites: StateFlow<List<BookRecord>> = dao.observeArchivedFavorites()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun selectTag(tag: String) { _selectedTag.value = tag }
+
+    fun setTag(id: String, tag: String) = viewModelScope.launch {
+        dao.setTag(id, tag)
+    }
 
     fun setFinished(id: String, finished: Boolean) = viewModelScope.launch {
         dao.setFinished(id, finished)

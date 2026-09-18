@@ -15,8 +15,15 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 0 ORDER BY sortOrder ASC, favoriteAt DESC")
     fun observeFavorites(): Flow<List<BookRecord>>
 
-    // LibraryRepository.Dao 继承的方法需在此带 Room 注解重新声明（override），
-    // Room 要求 DAO 层级中每个抽象方法都必须有 @Query/@Insert 等注解
+    @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 0 AND tag = :tag ORDER BY sortOrder ASC, favoriteAt DESC")
+    fun observeFavoritesByTag(tag: String): Flow<List<BookRecord>>
+
+    @Query("SELECT DISTINCT tag FROM book_records WHERE isFavorite = 1 AND isFinished = 0 AND tag != ''")
+    fun observeDistinctTags(): Flow<List<String>>
+
+    @Query("UPDATE book_records SET tag = :tag WHERE id = :id")
+    suspend fun setTag(id: String, tag: String)
+
     @Query("SELECT * FROM book_records WHERE id = :id")
     override suspend fun getById(id: String): BookRecord?
 
@@ -35,7 +42,6 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("DELETE FROM book_records WHERE id = :id")
     suspend fun delete(id: String)
 
-
     @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 1 ORDER BY favoriteAt DESC")
     fun observeArchivedFavorites(): Flow<List<BookRecord>>
 
@@ -44,6 +50,7 @@ interface BookRecordDao : LibraryRepository.Dao {
 
     @Query("UPDATE book_records SET sortOrder = :order WHERE id = :id")
     suspend fun setSortOrder(id: String, order: Int)
+
     @Query("DELETE FROM book_records")
     suspend fun clearAll()
 }

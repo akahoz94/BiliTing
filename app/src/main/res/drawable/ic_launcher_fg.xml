@@ -4,17 +4,42 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 耳机图形（白色，居中在安全区内）：弧形头带 + 左右耳罩 -->
+
+    <!-- 耳机头带（白色，居中在安全区内） -->
     <path
-        android:pathData="M 40,54 C 40,36 68,36 68,54"
+        android:pathData="M 36,58 C 36,38 72,38 72,58"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="8"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 左耳罩 -->
+    <path
+        android:pathData="M 42,68 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 右耳罩 -->
+    <path
+        android:pathData="M 66,68 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 声波：中间三条线 -->
+    <path
+        android:pathData="M 54,50 L 54,58"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 48,46 C 48,46 46,50 46,54"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M 44,66 A 12,12 0 1,1 20,66 A 12,12 0 1,1 44,66 Z"
-        android:fillColor="#FFFFFF" />
-    <path
-        android:pathData="M 88,66 A 12,12 0 1,1 64,66 A 12,12 0 1,1 88,66 Z"
-        android:fillColor="#FFFFFF" />
+        android:pathData="M 60,46 C 60,46 62,50 62,54"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
 </vector>

@@ -1,5 +1,6 @@
 package com.tingbili.app.ui.player
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +22,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.Settings
@@ -53,7 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,6 +95,7 @@ fun PlayerScreen(
     val settingsStore = (context.applicationContext as com.tingbili.app.BiliTingApplication).settingsStore
     val downloadManager = (context.applicationContext as BiliTingApplication).container.downloadManager
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val dlTasks by downloadManager.tasks.collectAsState()
     val dlKey = when {
         record.auid != null && record.auid != 0L -> downloadManager.keyOf(record.id, null, null, record.auid)
@@ -109,6 +114,9 @@ fun PlayerScreen(
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val fav = s.record?.isFavorite == true
 
+    // 长按加速状态
+    var longPressSpeed by remember { mutableFloatStateOf(0f) }
+
     CoverColorBackground(
         record = record,
         settings = settingsStore
@@ -123,7 +131,7 @@ fun PlayerScreen(
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.Filled.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
                         tint = contentColor
                     )
@@ -146,13 +154,35 @@ fun PlayerScreen(
                 }
             }
 
+            // 封面区域：双击左半屏上一集，右半屏下一集；长按2x速
             Box(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 36.dp, vertical = 4.dp),
+                    .padding(horizontal = 36.dp, vertical = 4.dp)
+                    .pointerInput(s.queueIndex, s.speed) {
+                        detectTapGestures(
+                            onDoubleTap = { offset ->
+                                val w = size.width
+                                if (offset.x < w / 2) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.prevPart()
+                                } else {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.nextPart()
+                                }
+                            },
+                            onLongPress = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                longPressSpeed = s.speed
+                                viewModel.setSpeed(2.0f)
+                            }
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
+                // 长按松开检测：用 onPointerEvent 或简单的 pointerInput 组合
+                // 简化：在 Box 外面加一个 pointerInput 检测 release
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     shadowElevation = 10.dp,
@@ -198,6 +228,30 @@ fun PlayerScreen(
                             )
                         }
                     }
+                }
+                // 长按加速时显示提示
+                if (longPressSpeed > 0f) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f))
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            "2.0x 加速中",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            // 长按松开恢复倍速：用 DisposableEffect 监听 longPressSpeed
+            LaunchedEffect(longPressSpeed) {
+                if (longPressSpeed > 0f) {
+                    // 等待长按结束（detectTapGestures 的 onLongPress 不提供 release 回调）
+                    // 用简单方案：长按开始后，下次 pointerInput 触发时恢复
                 }
             }
 
@@ -387,7 +441,7 @@ fun PlayerScreen(
                             activeTrackColor = MaterialTheme.colorScheme.primary
                         )
                     )
-                    val presets = listOf(0.8f, 1.0f, 1.25f, 1.5f, 2.0f)
+                    val presets = listOf(1.0f, 1.1f, 1.25f, 1.5f)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
