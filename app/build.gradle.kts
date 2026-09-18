@@ -37,6 +37,29 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // ===== 发行版归档：统一文件名 + 打完自动落到发行版目录 =====
+    //
+    // 命名规则与「G:\biliting开发\发行版」历史产物保持一致：
+    //   BiliTing-v<versionName>-<release|debug>.apk
+    // 例：BiliTing-v0.23.4-release.apk
+    val archiveDir = file("G:/biliting开发/发行版")
+
+    afterEvaluate {
+        // assemble<Type> 任务在 afterEvaluate 之后才注册，钩子必须延迟到这里
+        listOf("Release", "Debug").forEach { type ->
+            val lower = type.lowercase()
+            val apkName = "BiliTing-v${android.defaultConfig.versionName}-$lower.apk"
+            val archive = tasks.register<Copy>("archiveApk$type") {
+                dependsOn("assemble$type")
+                // 构建产物原名 app-<type>.apk，归档到发行版目录时统一改名
+                from(layout.buildDirectory.file("outputs/apk/$lower/app-$lower.apk"))
+                into(archiveDir)
+                rename { apkName }
+            }
+            tasks.named("assemble$type") { finalizedBy(archive) }
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
