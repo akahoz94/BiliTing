@@ -82,6 +82,16 @@ class BiliTingApplication : Application() {
             }.onFailure {
                 Log.w(TAG_BANNER, "启动预初始化 Player 失败：${it.message}")
             }
+            // 启动时恢复最近播放记录，让迷你播放条常驻显示
+            runCatching {
+                val recent = appDatabase.bookRecordDao().getMostRecent()
+                if (recent != null) {
+                    playerHolder.updateRecord(recent)
+                    Log.i(TAG_BANNER, "恢复最近播放记录：${recent.title}")
+                }
+            }.onFailure {
+                Log.w(TAG_BANNER, "恢复最近播放记录失败：${it.message}")
+            }
             // 启动时把老版本明文存储的 WebDAV 密码升级为 KeyStore 加密
             runCatching { settingsStore.migrateWebdavPassToEncrypted() }
                 .onFailure { Log.w(TAG_BANNER, "WebDAV 密码加密迁移失败", it) }

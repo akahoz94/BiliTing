@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookRecordDao : LibraryRepository.Dao {
+    @Query("SELECT * FROM book_records ORDER BY lastPlayedAt DESC LIMIT 1")
+    suspend fun getMostRecent(): BookRecord?
+
     @Query("SELECT * FROM book_records ORDER BY lastPlayedAt DESC")
     fun observeHistory(): Flow<List<BookRecord>>
 
