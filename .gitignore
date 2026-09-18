@@ -4,3 +4,11 @@ local.properties
 .idea/
 *.iml
 .kotlin/
+
+# 构建产物：仓库只存源码，APK/AAB 一律不入库
+*.apk
+*.aab
+*.ap_
+*.keystore
+*.jks
+bin/
