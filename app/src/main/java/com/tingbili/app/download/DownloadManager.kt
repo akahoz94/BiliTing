@@ -150,15 +150,10 @@ class DownloadManager(
         recordId: String, bvid: String?, cid: Long?, auid: Long?, partTitle: String
     ): Boolean {
         return try {
-            val referer = if (!bvid.isNullOrBlank()) {
-                "https://www.bilibili.com/video/$bvid"
-            } else {
-                "https://www.bilibili.com/"
-            }
+            val referer = "https://www.bilibili.com/"
             val req = Request.Builder().url(url)
-                .header("Range", "bytes=0-")
-                .header("Referer", referer)
-                .header("Cookie", cookieHeader())
+                                .header("Referer", referer)
+                .apply { val ck = cookieHeader(); if (ck.isNotBlank()) header("Cookie", ck) }
                 .header("User-Agent", UA)
                 .build()
             client.newCall(req).execute().use { resp ->
