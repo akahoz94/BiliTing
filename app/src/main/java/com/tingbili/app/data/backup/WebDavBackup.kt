@@ -3,6 +3,7 @@ package com.tingbili.app.data.backup
 import android.util.Base64
 import android.util.Log
 import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.data.local.SettingsSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -36,11 +37,11 @@ class WebDavBackup(
     private val remoteUrl get() = "$baseUrl/$remoteFile"
 
     @Serializable
-    data class BackupPayload(val version: Int = 1, val records: List<BookRecord>)
+    data class BackupPayload(val version: Int = 1, val records: List<BookRecord>, val settings: SettingsSnapshot? = null)
 
-    suspend fun backup(records: List<BookRecord>): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun backup(records: List<BookRecord>, settings: SettingsSnapshot? = null): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val json = Json.encodeToString(BackupPayload(records = records))
+            val json = Json.encodeToString(BackupPayload(records = records, settings = settings))
             val (cipherText, iv) = aesEncrypt(json.toByteArray(Charsets.UTF_8), backupPass.toKey())
             val body = (iv + cipherText)
             val req = Request.Builder().url(remoteUrl)
@@ -53,20 +54,20 @@ class WebDavBackup(
         }.onFailure { Log.e("WebDavBackup", "backup failed", it) }
     }
 
-    suspend fun restore(): Result<List<BookRecord>> = withContext(Dispatchers.IO) {
+    suspend fun restore(): Result<BackupPayload> = withContext(Dispatchers.IO) {
         runCatching {
             val req = Request.Builder().url(remoteUrl)
                     .header("Authorization", Credentials.basic(user, pass))
                     .get().build()
             client.newCall(req).execute().use { resp ->
-                if (resp.code == 404) return@use emptyList<BookRecord>()
+                if (resp.code == 404) return@use BackupPayload(records = emptyList())
                 if (!resp.isSuccessful) error("GET ${resp.code}: ${resp.message}")
                 val body = resp.body?.bytes() ?: error("empty body")
                 if (body.size < 28) error("body too short")
                 val iv = body.copyOfRange(0, 12)
                 val cipherText = body.copyOfRange(12, body.size)
                 val plain = aesDecrypt(cipherText, iv, backupPass.toKey())
-                Json.decodeFromString(BackupPayload.serializer(), String(plain, Charsets.UTF_8)).records
+                Json.decodeFromString(BackupPayload.serializer(), String(plain, Charsets.UTF_8))
             }
         }.onFailure { Log.e("WebDavBackup", "restore failed", it) }
     }
