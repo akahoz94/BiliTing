@@ -75,7 +75,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun PlayerScreen(
     onBack: () -> Unit = {},
-    onOpenAuthor: (Long, String, String) -> Unit = { _, _, _ -> },
+    onOpenAuthor: (Long, String, String, String) -> Unit = { _, _, _, _ -> },
     viewModel: PlayerViewModel = viewModel(factory = PlayerViewModel.Factory)
 ) {
     LaunchedEffect(Unit) { viewModel.bind() }
@@ -285,7 +285,7 @@ fun PlayerScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = if (record.ownerMid > 0) Modifier.clickable {
-                                onOpenAuthor(record.ownerMid, ownerTxt, record.ownerAvatar)
+                                onOpenAuthor(record.ownerMid, ownerTxt, record.ownerAvatar, record.bvid ?: "")
                             } else Modifier
                         )
                     }
@@ -387,7 +387,7 @@ fun PlayerScreen(
                 ) {
                     if (!dlDone && dlRunningPct == null) {
                         val partTitle = s.queue.getOrNull(s.queueIndex)?.part ?: ""
-                        scope.launch {
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                             downloadManager.download(
                                 recordId = record.id,
                                 bookTitle = record.title,

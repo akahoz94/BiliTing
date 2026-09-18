@@ -24,31 +24,30 @@ class PlayRepository(
      * 失败再回退直接调 playurl API。
      */
     suspend fun resolveAudioUrl(bvid: String?, cid: Long?, auid: Long?): String? {
-        // 视频：WebView 嗅探优先
+        // 视频：直连 API 优先（快），失败再 WebView 嗅探兜底
         if (bvid != null && bvid.isNotBlank() && cid != null && cid > 0L) {
-            // 1) WebView 嗅探（最稳定）
+            // 1) DASH 直链（首选，快）
+            val dash = playUrlApi.audioUrl(bvid, cid)
+            if (!dash.isNullOrBlank()) {
+                Log.i(TAG, "playUrl API 成功: $bvid")
+                return dash
+            }
+            // 2) legacy durl
+            val legacy = playUrlApi.legacyDurl(bvid, cid)
+            if (!legacy.isNullOrBlank()) {
+                Log.i(TAG, "legacy durl 成功: $bvid")
+                return legacy
+            }
+            // 3) WebView 嗅探兜底（API 被风控时用）
             sniffer?.let { s ->
                 runCatching { s.sniff(bvid, cid) }
                     .onSuccess { url ->
                         if (!url.isNullOrBlank()) {
-                            Log.i(TAG, "WebView 嗅探成功: $bvid")
+                            Log.i(TAG, "WebView 嗅探成功(兜底): $bvid")
                             return url
                         }
                     }
                     .onFailure { Log.w(TAG, "WebView 嗅探异常: ${it.message}") }
-            }
-
-            // 2) 直连 API 兜底
-            val dash = playUrlApi.audioUrl(bvid, cid)
-            if (!dash.isNullOrBlank()) {
-                Log.i(TAG, "playUrl API 成功(兜底): $bvid")
-                return dash
-            }
-            // 3) legacy durl
-            val legacy = playUrlApi.legacyDurl(bvid, cid)
-            if (!legacy.isNullOrBlank()) {
-                Log.i(TAG, "legacy durl 成功(兜底): $bvid")
-                return legacy
             }
         }
         // 音频区
@@ -60,14 +59,17 @@ class PlayRepository(
 
     suspend fun candidates(bvid: String?, cid: Long?): List<String> {
         if (bvid == null || cid == null || cid <= 0L) return emptyList()
-        // WebView 嗅探的单个URL直接返回
+        // 跟播放一致：API 优先（ExoPlayer 验证过的URL），WebView 兜底
+        val apiUrls = playUrlApi.candidates(bvid, cid)
+        if (apiUrls.isNotEmpty()) return apiUrls
+        // API 失败时用 WebView 嗅探
         sniffer?.let { s ->
             runCatching { s.sniff(bvid, cid) }
                 .getOrNull()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { return listOf(it) }
         }
-        return playUrlApi.candidates(bvid, cid)
+        return emptyList()
     }
 
     suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<PartItem>>? {

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
@@ -190,4 +191,66 @@ class SettingsStore(private val context: Context) {
             }
         }
     }
+
+    /** 导出设置快照（用于 WebDAV 备份） */
+    suspend fun exportSnapshot(): SettingsSnapshot {
+        val prefs = dataStore.data.first()
+        return SettingsSnapshot(
+            playbackSpeed = prefs[keyPlaybackSpeed] ?: 1.0f,
+            sleepMinutes = prefs[keySleepMinutes] ?: 30,
+            sleepEndOfTrack = prefs[keySleepEndOfTrack] ?: false,
+            themeMode = prefs[keyTheme] ?: 0,
+            themeColor = prefs[keyThemeColor] ?: Defaults.COLOR_PURPLE,
+            audioOnly = prefs[keyAudioOnly] ?: true,
+            immersiveMode = prefs[keyImmersiveMode] ?: 0,
+            paletteStrength = prefs[keyPaletteStrength] ?: 60,
+            autoNextEnabled = prefs[keyAutoNextEnabled] ?: false,
+            rememberSpeedPerAuthor = prefs[keyRememberSpeedPerAuthor] ?: false,
+            playlistGroupMode = prefs[keyPlaylistGroupMode] ?: 0,
+            keywords = (prefs[keyKeywords] ?: Defaults.KEYWORDS).toList(),
+            shelfFolders = prefs[keyShelfFolders] ?: "",
+            authorSpeedMap = prefs[keyAuthorSpeedMap] ?: "",
+            listeningMs = prefs[keyListeningMs] ?: ""
+        )
+    }
+
+    /** 从快照恢复设置（用于 WebDAV 恢复） */
+    suspend fun importSnapshot(s: SettingsSnapshot) {
+        dataStore.edit { prefs ->
+            prefs[keyPlaybackSpeed] = s.playbackSpeed
+            prefs[keySleepMinutes] = s.sleepMinutes
+            prefs[keySleepEndOfTrack] = s.sleepEndOfTrack
+            prefs[keyTheme] = s.themeMode
+            prefs[keyThemeColor] = s.themeColor
+            prefs[keyAudioOnly] = s.audioOnly
+            prefs[keyImmersiveMode] = s.immersiveMode
+            prefs[keyPaletteStrength] = s.paletteStrength
+            prefs[keyAutoNextEnabled] = s.autoNextEnabled
+            prefs[keyRememberSpeedPerAuthor] = s.rememberSpeedPerAuthor
+            prefs[keyPlaylistGroupMode] = s.playlistGroupMode
+            prefs[keyKeywords] = s.keywords.toSet()
+            prefs[keyShelfFolders] = s.shelfFolders
+            prefs[keyAuthorSpeedMap] = s.authorSpeedMap
+            prefs[keyListeningMs] = s.listeningMs
+        }
+    }
 }
+
+@kotlinx.serialization.Serializable
+data class SettingsSnapshot(
+    val playbackSpeed: Float = 1.0f,
+    val sleepMinutes: Int = 30,
+    val sleepEndOfTrack: Boolean = false,
+    val themeMode: Int = 0,
+    val themeColor: Int = 0,
+    val audioOnly: Boolean = true,
+    val immersiveMode: Int = 0,
+    val paletteStrength: Int = 60,
+    val autoNextEnabled: Boolean = false,
+    val rememberSpeedPerAuthor: Boolean = false,
+    val playlistGroupMode: Int = 0,
+    val keywords: List<String> = emptyList(),
+    val shelfFolders: String = "",
+    val authorSpeedMap: String = "",
+    val listeningMs: String = ""
+)

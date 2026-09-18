@@ -572,13 +572,14 @@ private fun WebDavDialog(
 ) {
     var url by remember { mutableStateOf(initialUrl) }
     var user by remember { mutableStateOf(initialUser) }
-    var pass by remember { mutableStateOf("") }
+    var davPass by remember { mutableStateOf("") }
+    var encPass by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "WebDAV 备份",
+                "WebDAV 设置",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold
@@ -590,28 +591,36 @@ private fun WebDavDialog(
                 OutlinedTextField(
                     value = url, onValueChange = { url = it; onSaveUrl(it) },
                     label = { Text("WebDAV 地址") },
-                    placeholder = { Text("https://dav.example.com/BiliTing") },
+                    placeholder = { Text("https://dav.jianguoyun.com/dav/") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next)
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = user, onValueChange = { user = it; onSaveUser(it) },
-                    label = { Text("用户名") },
+                    label = { Text("用户名（邮箱）") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = pass, onValueChange = { pass = it; onSavePass(it) },
-                    label = { Text("备份密码（加密用）") },
+                    value = davPass, onValueChange = { davPass = it; onSavePass(it) },
+                    label = { Text("WebDAV 密码（坚果云应用密码）") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Password)
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = encPass, onValueChange = { encPass = it },
+                    label = { Text("备份加密密码（自己设一个）") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Password)
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "URL 与用户名立即保存到本机；密码以密文保存。备份/恢复时用密码派生 AES-256 密钥，云端只看到密文。",
+                    "WebDAV 密码填坚果云后台→账户→安全→第三方应用管理生成的应用密码（不是登录密码）。备份加密密码自己设一个，用于加密云端数据。",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Serif
                     ),
@@ -621,8 +630,8 @@ private fun WebDavDialog(
         },
         confirmButton = {
             Button(
-                onClick = { if (!busy) onBackup(pass) },
-                enabled = !busy && pass.isNotBlank()
+                onClick = { if (!busy) onBackup(encPass) },
+                enabled = !busy && encPass.isNotBlank() && davPass.isNotBlank()
             ) { Text(if (busy) "处理中..." else "备份") }
         },
         dismissButton = {
@@ -632,8 +641,8 @@ private fun WebDavDialog(
                 TextButton(onClick = onDismiss) { Text("关闭") }
                 Spacer(Modifier.width(4.dp))
                 Button(
-                    onClick = { if (!busy) onRestore(pass) },
-                    enabled = !busy && pass.isNotBlank()
+                    onClick = { if (!busy) onRestore(encPass) },
+                    enabled = !busy && encPass.isNotBlank() && davPass.isNotBlank()
                 ) { Text("恢复") }
             }
         }

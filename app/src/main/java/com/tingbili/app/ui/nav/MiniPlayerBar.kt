@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -96,9 +97,14 @@ fun MiniPlayerBar(
 
     val launcher = BiliTingApplication.get()?.container?.playerLauncher
 
+    Column {
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        )
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shadowElevation = 8.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        shadowElevation = 0.dp,
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -186,6 +192,7 @@ fun MiniPlayerBar(
                 Icon(Icons.Filled.SkipNext, contentDescription = "下一集", tint = MaterialTheme.colorScheme.onSurface)
             }
         }
+    }
     }
 
     if (showParts && launcher != null) {

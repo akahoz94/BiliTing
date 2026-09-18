@@ -35,6 +35,7 @@ class PlayerHolder(
     private var _trackSelector: DefaultTrackSelector? = null
     private var _mediaControllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
+    var currentAudioUrl: String = ""
 
     val player: ExoPlayer
         get() = _player ?: ensurePlayer()
@@ -220,6 +221,7 @@ class PlayerHolder(
                     )
                 }
             }
+            currentAudioUrl = audioUrl
             player.setMediaItems(items, startIndex, positionMs)
         } else {
             val firstItem = MediaItem.Builder()
@@ -227,6 +229,7 @@ class PlayerHolder(
                 .setMediaId(record.id)
                 .setMediaMetadata(metaBuilder.build())
                 .build()
+            currentAudioUrl = audioUrl
             player.setMediaItem(firstItem)
             player.seekTo(positionMs)
         }

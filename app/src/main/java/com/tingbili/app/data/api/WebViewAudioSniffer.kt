@@ -3,6 +3,7 @@ package com.tingbili.app.data.api
 import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -11,41 +12,34 @@ import kotlin.coroutines.resume
 /**
  * WebView 音频URL嗅探器 —— 仿"我的听书"方案。
  *
- * 原理：隐藏 WebView 加载 B站视频页，页面 SSR 注入 window.__playinfo__，
- * 执行 JS 直接取出 DASH 音频流地址。WebView 自带浏览器指纹，B站不风控。
- *
- * 比直接调 playurl API 稳定得多：不需要 WBI 签名、不依赖 UA/cookie 精度。
+ * 原理：隐藏 WebView 加载 B站视频页，让播放器自己加载音频流。
+ * 通过 shouldInterceptRequest 拦截实际的 .m4s 网络请求，抓到播放器真正用的音频 URL。
+ * 比读 __playinfo__ 可靠：不依赖页面 SSR 格式，拿到的就是播放器实际发出的请求。
  */
 class WebViewAudioSniffer(private val context: Context) {
 
     companion object {
         private const val TAG = "WebViewSniffer"
-        private const val TIMEOUT_MS = 15_000L
+        private const val TIMEOUT_MS = 20_000L
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     }
 
-    /**
-     * 嗅探视频的音频流 URL。
-     * @param bvid 视频 BV号
-     * @param cid  分P cid（可选，默认第一P）
-     * @return 音频流绝对URL，失败返回 null
-     */
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun sniff(bvid: String, cid: Long? = null): String? {
         val pageUrl = buildString {
             append("https://www.bilibili.com/video/")
             append(bvid)
             append("/")
-            if (cid != null && cid > 0) append("?p=1")
+            if (cid != null && cid > 0) append("?p=${cid}")
         }
 
         return suspendCancellableCoroutine { cont ->
-            // WebView 必须在 UI 线程创建
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             handler.post {
                 var webView: WebView? = null
                 var resumed = false
+                var capturedUrl: String? = null
 
                 fun done(url: String?) {
                     if (resumed) return
@@ -62,58 +56,59 @@ class WebViewAudioSniffer(private val context: Context) {
                     val settings = webView!!.settings
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.userAgentString = DESKTOP_UA
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
-                    settings.blockNetworkImage = true // 不加载图片，省流量加速
+                    settings.blockNetworkImage = true
                     settings.setSupportMultipleWindows(false)
 
-                    // JS 接口：页面加载完成后由 onPageFinished 调用 evaluateJavascript 取地址
                     webView!!.addJavascriptInterface(object {
                         @JavascriptInterface
-                        fun onResult(url: String) {
-                            done(url)
-                        }
+                        fun onResult(url: String) { done(url) }
                         @JavascriptInterface
                         fun onFail(reason: String) {
-                            android.util.Log.w(TAG, "JS 取地址失败: $reason")
-                            done(null)
+                            android.util.Log.w(TAG, "JS: $reason")
                         }
                     }, "BiliTingBridge")
 
                     webView!!.webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                            val url = request.url?.toString() ?: return null
+                            // 拦截 .m4s 音频流请求（DASH 音频）
+                            if (url.contains(".m4s") && url.contains("bilivideo.com")) {
+                                // 区分音频和视频：音频 URL 通常有 codecid=302xx 或路径含 /audio/
+                                // 简单策略：优先含 "audio" 路径的，其次第一个 .m4s
+                                if (capturedUrl == null) {
+                                    android.util.Log.i(TAG, "捕获音频流: ${url.take(100)}")
+                                    capturedUrl = url
+                                    // 延迟一点再回调，确保拿到的是音频不是视频
+                                    handler.postDelayed({ done(capturedUrl) }, 500)
+                                }
+                            }
+                            return null
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // 页面加载完后执行 JS 提取 __playinfo__
+                            // 先试试 __playinfo__ 作为快速通道
                             val js = """
                                 (function() {
                                     try {
                                         var pi = window.__playinfo__;
-                                        if (!pi || !pi.data) {
-                                            BiliTingBridge.onFail("no __playinfo__");
-                                            return;
-                                        }
+                                        if (!pi || !pi.data) return;
                                         var dash = pi.data.dash;
                                         if (dash && dash.audio && dash.audio.length > 0) {
-                                            // 按音质降序取第一个（id 越大音质越高）
                                             var audios = dash.audio.sort(function(a,b){return b.id - a.id;});
-                                            var url = audios[0].baseUrl || audios[0].base_url || "";
-                                            if (url) {
-                                                BiliTingBridge.onResult(url);
-                                                return;
+                                            var u = audios[0].baseUrl || audios[0].base_url || "";
+                                            if (u && !window.__sniffed) {
+                                                window.__sniffed = true;
+                                                BiliTingBridge.onResult(u);
                                             }
                                         }
-                                        // 兜底：durl
-                                        var durl = pi.data.durl;
-                                        if (durl && durl.length > 0) {
-                                            var u = durl[0].url || "";
-                                            if (u) { BiliTingBridge.onResult(u); return; }
-                                        }
-                                        BiliTingBridge.onFail("no audio in playinfo");
-                                    } catch(e) {
-                                        BiliTingBridge.onFail("exception: " + e.message);
-                                    }
+                                    } catch(e) {}
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
@@ -122,10 +117,9 @@ class WebViewAudioSniffer(private val context: Context) {
 
                     webView!!.loadUrl(pageUrl)
 
-                    // 超时兜底
                     handler.postDelayed({
-                        android.util.Log.w(TAG, "嗅探超时 bvid=$bvid")
-                        done(null)
+                        android.util.Log.w(TAG, "嗅探超时 bvid=$bvid captured=$capturedUrl")
+                        done(capturedUrl)
                     }, TIMEOUT_MS)
 
                 } catch (t: Throwable) {

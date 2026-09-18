@@ -32,6 +32,7 @@ class SettingsViewModel(
     val sleepEndOfTrack: StateFlow<Boolean> = store.sleepEndOfTrack.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val webdavUrl: StateFlow<String> = store.webdavUrl.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val webdavUser: StateFlow<String> = store.webdavUser.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val webdavPass: StateFlow<String> = store.webdavPass.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val immersiveMode: StateFlow<Int> = store.immersiveMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 60)
     val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -104,8 +105,8 @@ class SettingsViewModel(
         _busy.value = true
         viewModelScope.launch {
             val records = app.container.libraryRepo.all()
-            val r = WebDavBackup(baseUrl, user, "", pass).backup(records)
-            _msg.value = r.fold({ "已备份 ${records.size} 条" }, { "备份失败：${it.message}" })
+            val snapshot = store.exportSnapshot()
+            val r = WebDavBackup(baseUrl, user, webdavPass.value, pass).backup(records, snapshot)
             _busy.value = false
         }
     }
@@ -118,10 +119,11 @@ class SettingsViewModel(
         }
         _busy.value = true
         viewModelScope.launch {
-            val r = WebDavBackup(baseUrl, user, "", pass).restore()
-            r.fold({ list ->
-                app.container.libraryRepo.replaceAll(list)
-                _msg.value = "已恢复 ${list.size} 条"
+            val r = WebDavBackup(baseUrl, user, webdavPass.value, pass).restore()
+            r.fold({ payload ->
+                app.container.libraryRepo.replaceAll(payload.records)
+                payload.settings?.let { store.importSnapshot(it) }
+                _msg.value = "已恢复 ${payload.records.size} 条 + 设置"
             }, { _msg.value = "恢复失败：${it.message}" })
             _busy.value = false
         }
@@ -136,7 +138,7 @@ class SettingsViewModel(
         }
         _busy.value = true
         viewModelScope.launch {
-            val ok = WebDavBackup(baseUrl, user, "", "").ping()
+            val ok = WebDavBackup(baseUrl, user, webdavPass.value, "").ping()
             _msg.value = if (ok) "连接成功 ✓" else "连接失败：检查地址和用户名/密码"
             _busy.value = false
         }

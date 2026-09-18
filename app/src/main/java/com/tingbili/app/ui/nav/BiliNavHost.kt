@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -30,6 +31,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -121,11 +130,29 @@ fun BiliNavHost() {
         }
     }
 
-    fun openAuthor(mid: Long, name: String, avatar: String) {
-        if (mid <= 0L) return
+    fun openAuthor(mid: Long, name: String, avatar: String, bvid: String = "") {
         val safeName = name.ifBlank { "未知UP" }
         val safeAvatar = avatar.ifBlank { "none" }
-        navController.navigate("author?mid=$mid&name=${Uri.encode(safeName)}&avatar=${Uri.encode(safeAvatar)}")
+        if (mid > 0L) {
+            navController.navigate("author?mid=$mid&name=${Uri.encode(safeName)}&avatar=${Uri.encode(safeAvatar)}")
+            return
+        }
+        if (bvid.isNotBlank()) {
+            scope.launch {
+                val resolved = runCatching { container.biliService.view(bvid) }.getOrNull()
+                val o = resolved?.data?.owner
+                val realMid = o?.mid ?: 0L
+                if (realMid > 0L) {
+                    val realName = o?.name.orEmpty().ifBlank { safeName }
+                    val realAvatar = o?.face.orEmpty().ifBlank { safeAvatar }
+                    navController.navigate("author?mid=$realMid&name=${Uri.encode(realName)}&avatar=${Uri.encode(realAvatar)}")
+                } else {
+                    com.tingbili.app.util.ErrorBus.post(message = "未获取到UP主信息")
+                }
+            }
+        } else {
+            com.tingbili.app.util.ErrorBus.post(message = "未获取到UP主信息")
+        }
     }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -136,7 +163,9 @@ fun BiliNavHost() {
                         holder = container.playerHolder,
                         onOpenPlayer = { navController.navigate("player") }
                     )
-                    NavigationBar {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ) {
                         Tab.entries.forEach { tab ->
                             NavigationBarItem(
                                 selected = currentRoute == tab.route,
@@ -161,7 +190,7 @@ fun BiliNavHost() {
             startDestination = Tab.Playlist.route,
             modifier = Modifier.fillMaxSize()
         ) {
-            composable(Tab.Playlist.route) {
+            composable(Tab.Playlist.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 PlaylistScreen(
                     onOpenPlayer = ::resumeAndNavigate,
                     onOpenSearch = {
@@ -174,21 +203,21 @@ fun BiliNavHost() {
                     modifier = Modifier.padding(padding)
                 )
             }
-            composable(Tab.Search.route) {
+            composable(Tab.Search.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 SearchScreen(
                     onOpenPlayer = ::playAndNavigate,
-                    onOpenAuthor = ::openAuthor,
+                    onOpenAuthor = { mid, name, avatar, bvid -> openAuthor(mid, name, avatar, bvid) },
                     onFavorite = ::favoriteSearchItem,
                     modifier = Modifier.padding(padding)
                 )
             }
-            composable(Tab.History.route) {
+            composable(Tab.History.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 HistoryScreen(
                     onOpenPlayer = ::resumeAndNavigate,
                     modifier = Modifier.padding(padding)
                 )
             }
-            composable(Tab.Settings.route) {
+            composable(Tab.Settings.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 SettingsScreen(
                     onOpenStats = { navController.navigate("stats") },
                     onOpenDownloads = { navController.navigate("downloads") },
@@ -196,10 +225,10 @@ fun BiliNavHost() {
                 )
             }
 
-            composable("player") {
+            composable("player", enterTransition = { slideInVertically(tween(350)) { it } }, exitTransition = { slideOutVertically(tween(350)) { it } }) {
                 PlayerScreen(
                     onBack = { navController.popBackStack() },
-                    onOpenAuthor = { mid, name, avatar -> openAuthor(mid, name, avatar) }
+                    onOpenAuthor = { mid, name, avatar, bvid -> openAuthor(mid, name, avatar, bvid) }
                 )
             }
             composable("author?mid={mid}&name={name}&avatar={avatar}") { entry ->

@@ -80,7 +80,7 @@ import com.tingbili.app.util.FormatUtil
 @Composable
 fun SearchScreen(
     onOpenPlayer: (SearchItem) -> Unit = {},
-    onOpenAuthor: (Long, String, String) -> Unit = { _, _, _ -> },
+    onOpenAuthor: (Long, String, String, String) -> Unit = { _, _, _, _ -> },
     onFavorite: (SearchItem) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SearchViewModel = viewModel(factory = SearchViewModel.Factory)
@@ -237,7 +237,7 @@ fun SearchScreen(
                     SearchResultRow(
                         item = item,
                         onClick = { onOpenPlayer(item) },
-                        onOpenAuthor = { onOpenAuthor(item.uid, item.author, item.upic) },
+                        onOpenAuthor = { onOpenAuthor(item.uid, item.author, item.upic, item.bvid) },
                         onFavorite = { onFavorite(item) }
                     )
                 }
