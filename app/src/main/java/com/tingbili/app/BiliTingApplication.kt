@@ -44,7 +44,7 @@ class BiliTingApplication : Application() {
         super.onCreate()
         _instance = this
         installCrashHandler()
-        Log.i(TAG_BANNER, "=== BiliTing v0.19.0 ===")
+        Log.i(TAG_BANNER, "=== BiliTing v0.19.5 ===")
         runCatching { AppImageLoader.get(this) }
             .onFailure { Log.e(TAG_BANNER, "AppImageLoader 初始化失败", it) }
         try {
@@ -76,7 +76,6 @@ class BiliTingApplication : Application() {
         } catch (t: Throwable) {
             Log.e(TAG_BANNER, "PlayerLauncher 初始化失败", t)
         }
-        // 启动自动恢复：预初始化 ExoPlayer，让用户点迷你播放器时秒开
         applicationScope.launch(Dispatchers.IO) {
             runCatching {
                 playerHolder.ensurePlayer()
@@ -94,7 +93,7 @@ class BiliTingApplication : Application() {
                 throwable.printStackTrace(PrintWriter(sw))
                 val body = buildString {
                     appendLine("=== BiliTing crash @ ${System.currentTimeMillis()} ===")
-                    appendLine("thread=${thread.name} build=v0.19.0")
+                    appendLine("thread=${thread.name} build=v0.19.5")
                     appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
                     appendLine(sw.toString())
                 }
@@ -135,7 +134,6 @@ class AppContainer(val app: BiliTingApplication) {
     }
     val baseCookie: String get() = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
     val cookieProvider: () -> String = {
-        // 每次 API 请求实时读：基础 buvid3 + 用户在设置里粘贴的完整 cookie（含 SESSDATA）
         val userCookie = runCatching { kotlinx.coroutines.runBlocking { app.cookieStore.cookieHeader() } }.getOrDefault("")
         if (userCookie.isNotBlank()) "$baseCookie; $userCookie" else baseCookie
     }
