@@ -10,6 +10,9 @@ import com.tingbili.app.data.repo.SearchRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 
 class PlayerLauncher(
     private val holder: PlayerHolder,
@@ -70,26 +73,32 @@ class PlayerLauncher(
             library.recordPlayed(r)
         } else {
             val bvid = existing.bvid!!
-            val queue = playRepo.resolveVideo(bvid)?.second
-                ?: listOf(PartItem(bvid, existing.currentCid ?: 0L, "", 0L))
-                    .filter { it.cid > 0L }
-            val cid = existing.currentCid ?: queue.firstOrNull()?.cid ?: return
+            val cid = existing.currentCid ?: return
             val url = playRepo.resolveAudioUrl(bvid, cid, null)
             if (url == null) {
                 com.tingbili.app.util.ErrorBus.post(message = "解析播放地址失败，请检查网络后重试")
                 return
             }
-            val idx = queue.indexOfFirst { it.cid == cid }.coerceAtLeast(0)
+            val singleQueue = listOf(PartItem(bvid, cid, "", 0L))
             val base = existing.copy(
                 progressMs = 0L,
                 currentCid = cid,
-                currentPart = idx + 1,
-                totalParts = queue.size,
+                currentPart = existing.currentPart,
+                totalParts = existing.totalParts,
                 speed = initialSpeed
             )
             val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
-            holder.play(r, url, queue, positionMs, initialSpeed, startIndex = idx)
+            holder.play(r, url, singleQueue, positionMs, initialSpeed, startIndex = 0)
             library.recordPlayed(r)
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val fullQueue = playRepo.resolveVideo(bvid)?.second
+                if (fullQueue != null && fullQueue.size > 1) {
+                    val idx = fullQueue.indexOfFirst { it.cid == cid }.coerceAtLeast(0)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        holder.play(r, url, fullQueue, positionMs, initialSpeed, startIndex = idx)
+                    }
+                }
+            }
         }
     }
 
