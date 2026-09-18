@@ -133,9 +133,14 @@ class AppContainer(val app: BiliTingApplication) {
         Log.w("AppContainer", "buvid3 初始化失败，改用临时值", e)
         WbiSigner.randomBuvid3()
     }
-    val cookie: String = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+    val baseCookie: String get() = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+    val cookieProvider: () -> String = {
+        // 每次 API 请求实时读：基础 buvid3 + 用户在设置里粘贴的完整 cookie（含 SESSDATA）
+        val userCookie = runCatching { kotlinx.coroutines.runBlocking { app.cookieStore.cookieHeader() } }.getOrDefault("")
+        if (userCookie.isNotBlank()) "$baseCookie; $userCookie" else baseCookie
+    }
 
-    val biliService: BiliApiService = buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
+    val biliService: BiliApiService = buildRetrofit(buildHttpClient(cookieProvider)).create(BiliApiService::class.java)
     private val wbiKeys = WbiKeyStore(biliService)
 
     val searchApi = SearchApi(biliService, wbiKeys)
@@ -143,7 +148,7 @@ class AppContainer(val app: BiliTingApplication) {
     val authorApi = AuthorApi(biliService, wbiKeys)
     val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService)
     val downloadManager: com.tingbili.app.download.DownloadManager = runCatching {
-        val client = buildHttpClient(cookie)
+        val client = buildHttpClient(cookieProvider)
         com.tingbili.app.download.DownloadManager(app, playRepo, app.cookieStore, client)
     }.getOrElse { e ->
         Log.e("AppContainer", "DownloadManager 初始化失败", e)
