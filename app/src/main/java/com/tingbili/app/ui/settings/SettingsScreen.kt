@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.FolderDelete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,7 +105,11 @@ fun SettingsScreen(
     val autoNext by viewModel.autoNextEnabled.collectAsState()
     val rememberSpeed by viewModel.rememberSpeedPerAuthor.collectAsState()
     val busy by viewModel.busy.collectAsState()
+    val coverCacheSize by viewModel.coverCacheSize.collectAsState()
+    val downloadCacheSize by viewModel.downloadCacheSize.collectAsState()
     val msg by viewModel.msg.collectAsState()
+
+    LaunchedEffect(Unit) { viewModel.refreshCacheSizes() }
 
     var showWebDav by remember { mutableStateOf(false) }
     var showCookie by remember { mutableStateOf(false) }
