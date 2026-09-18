@@ -122,6 +122,7 @@ fun BiliNavHost() {
     }
 
     fun openAuthor(mid: Long, name: String, avatar: String) {
+        if (mid <= 0L) return
         val safeName = name.ifBlank { "未知UP" }
         val safeAvatar = avatar.ifBlank { "none" }
         navController.navigate("author?mid=$mid&name=${Uri.encode(safeName)}&avatar=${Uri.encode(safeAvatar)}")

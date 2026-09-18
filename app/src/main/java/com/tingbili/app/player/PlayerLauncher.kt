@@ -48,7 +48,8 @@ class PlayerLauncher(
             )
             val rWithAuthor = if (r.ownerMid <= 0L) enrichAuthor(r) else r
             val url = playRepo.resolveAudioUrl(rWithAuthor.bvid, rWithAuthor.currentCid, null) ?: return
-            holder.play(rWithAuthor, url, queue, 0L, 1.0f)
+            val startIdx = queue.indexOfFirst { it.cid == rWithAuthor.currentCid }.coerceAtLeast(0)
+            holder.play(rWithAuthor, url, queue, 0L, 1.0f, startIndex = startIdx)
             library.recordPlayed(rWithAuthor)
         }
     }
@@ -87,9 +88,7 @@ class PlayerLauncher(
                 speed = initialSpeed
             )
             val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
-            holder.play(r, url, queue, positionMs, initialSpeed)
-            holder.moveQueueTo(idx)
-            holder.seekToQueue(idx, positionMs)
+            holder.play(r, url, queue, positionMs, initialSpeed, startIndex = idx)
             library.recordPlayed(r)
         }
     }
@@ -167,8 +166,7 @@ class PlayerLauncher(
         val url = playRepo.resolveAudioUrl(item.bvid, item.cid, null) ?: return
         val cur = holder.record.value ?: return
         val r = cur.copy(currentCid = item.cid, currentPart = index + 1, progressMs = 0L)
-        holder.play(r, url, queue, 0L, 1.0f)
-        holder.moveQueueTo(index)
+        holder.play(r, url, queue, 0L, 1.0f, startIndex = index)
         library.recordPlayed(r)
     }
 }

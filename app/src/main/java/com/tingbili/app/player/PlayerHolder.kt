@@ -50,7 +50,7 @@ class PlayerHolder(
                         .build()
                 }
             }.getOrElse {
-                Log.w("PlayerHolder", "DefaultTrackSelector 创建失败，降级为最小可用 Player：${it.message}")
+                Log.w("PlayerHolder", "DefaultTrackSelector 创建失败：${it.message}")
                 null
             }
             val p = runCatching {
@@ -62,12 +62,12 @@ class PlayerHolder(
                         .setUsage(C.USAGE_MEDIA)
                         .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                         .build(),
-                    /* handleAudioFocus = */ true
+                    true
                 )
                     .setHandleAudioBecomingNoisy(true)
                     .build()
             }.getOrElse {
-                Log.e("PlayerHolder", "ExoPlayer 创建失败，返回本地静音占位 Player，避免启动闪退", it)
+                Log.e("PlayerHolder", "ExoPlayer 创建失败", it)
                 ExoPlayer.Builder(appContext).build()
             }
             _player = p
@@ -98,13 +98,12 @@ class PlayerHolder(
             fut.addListener({
                 runCatching {
                     mediaController = fut.get()
-                    Log.i("PlayerHolder", "MediaController connected")
                 }.onFailure {
                     Log.w("PlayerHolder", "MediaController connect failed: ${it.message}")
                 }
             }, MoreExecutors.directExecutor())
         }.onFailure {
-            Log.w("PlayerHolder", "MediaController 异步连接创建失败：${it.message}")
+            Log.w("PlayerHolder", "MediaController 异步连接失败：${it.message}")
         }
     }
 
@@ -172,16 +171,21 @@ class PlayerHolder(
         }
     }
 
+    /**
+     * 开始播放。startIndex 指定队列中要播的集索引，audioUrl 是该集已解析的真实 URL。
+     * 其他集用 placeholder，切到时再异步解析。
+     */
     fun play(
         record: BookRecord,
         audioUrl: String,
         queue: List<PartItem>,
         positionMs: Long,
-        speed: Float
+        speed: Float,
+        startIndex: Int = 0
     ) {
         _record.value = record
         this.queue = queue
-        this.queueIndex = 0
+        this.queueIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
         val coverUrl = com.tingbili.app.util.CoverUtil.normalize(record.cover)
 
         val metaBuilder = MediaMetadata.Builder()
@@ -192,32 +196,41 @@ class PlayerHolder(
             metaBuilder.setArtworkUri(android.net.Uri.parse(coverUrl))
         }
 
-        val firstItem = MediaItem.Builder()
-            .setUri(audioUrl)
-            .setMediaId(record.id)
-            .setMediaMetadata(metaBuilder.build())
-            .build()
-
         if (queue.size > 1) {
-            val items = mutableListOf(firstItem)
-            for (i in 1 until queue.size) {
+            val items = mutableListOf<MediaItem>()
+            for (i in queue.indices) {
                 val p = queue[i]
-                items.add(
-                    MediaItem.Builder()
-                        .setMediaId("${record.id}#part${i}")
-                        .setUri("biliting://placeholder/${record.id}/${i}")
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(p.part)
-                                .setArtist(record.owner)
-                                .setAlbumTitle("BiliTing")
-                                .build()
-                        )
-                        .build()
-                )
+                if (i == startIndex) {
+                    items.add(
+                        MediaItem.Builder()
+                            .setUri(audioUrl)
+                            .setMediaId(record.id)
+                            .setMediaMetadata(metaBuilder.build())
+                            .build()
+                    )
+                } else {
+                    items.add(
+                        MediaItem.Builder()
+                            .setMediaId("${record.id}#part${i}")
+                            .setUri("biliting://placeholder/${record.id}/${i}")
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(p.part)
+                                    .setArtist(record.owner)
+                                    .setAlbumTitle("BiliTing")
+                                    .build()
+                            )
+                            .build()
+                    )
+                }
             }
-            player.setMediaItems(items, /* startIndex = */ 0, positionMs)
+            player.setMediaItems(items, startIndex, positionMs)
         } else {
+            val firstItem = MediaItem.Builder()
+                .setUri(audioUrl)
+                .setMediaId(record.id)
+                .setMediaMetadata(metaBuilder.build())
+                .build()
             player.setMediaItem(firstItem)
             player.seekTo(positionMs)
         }
@@ -228,7 +241,6 @@ class PlayerHolder(
         CoroutineScope(Dispatchers.IO).launch {
             val f = CoverDownloader.ensureLocalFile(appContext, coverUrl)
             _coverFile.value = f
-            Log.d("PlayerHolder", "封面本地缓存：${f?.absolutePath}")
         }
     }
 
@@ -247,7 +259,14 @@ class PlayerHolder(
 
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
-    fun seekTo(ms: Long) = player.seekTo(ms)
+
+    /** seekTo 后如果之前在播放就继续播放，暂停状态保持暂停 */
+    fun seekTo(ms: Long) {
+        val wasPlaying = runCatching { player.isPlaying }.getOrDefault(false)
+        player.seekTo(ms)
+        if (wasPlaying) player.play()
+    }
+
     fun pause() = player.pause()
     fun isPlaying(): Boolean = runCatching { player.isPlaying }.getOrDefault(false)
     fun togglePlayPause() {
