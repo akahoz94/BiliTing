@@ -14,13 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,22 +50,11 @@ import com.tingbili.app.ui.components.CoverImage
 import com.tingbili.app.ui.components.EmptyState
 import com.tingbili.app.ui.theme.AppTokens
 
-/**
- * 听单页 —— 第一版设计语言（统一全局）
- *
- * 视觉规范（与搜索/历史/设置 Tab 共享）：
- *   - 字体：Noto Serif SC 衬线（与小说听书调性契合）
- *   - 卡片：surface 底色 + AppTokens.RadiusHero(24dp) 圆角 + AppTokens.Spacing4(16dp) 内边距
- *   - 封面：AppTokens.RadiusCover(16dp) 圆角，96dp 大封面
- *   - 进度条：AppTokens.ProgressTrackHero(6dp) 高，primary 主色 + outlineVariant 半透明轨道
- *   - 迷你播放器：surfaceContainerHigh 底色，圆形 primary 播放按钮
- *   - 标题字重：Bold（700）/ Semibold（600）；AppBar 标题 28sp display 风格
- *   - 0 emoji，所有图标用 Material Icons
- */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistScreen(
     onOpenPlayer: (BookRecord) -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: PlaylistViewModel = viewModel(factory = PlaylistViewModel.Factory)
 ) {
@@ -86,11 +76,21 @@ fun PlaylistScreen(
                     )
                 },
                 actions = {
-                    IconButton(onClick = { /* 由 NavHost 路由到搜索 */ }) {
+                    IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Filled.Search, contentDescription = "搜索")
                     }
-                    IconButton(onClick = { /* 三点菜单：清空听单 / 排序 */ }) {
+                    var menuExpanded by remember { mutableStateOf(false) }
+                    IconButton(onClick = { menuExpanded = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("清空已归档") },
+                            onClick = {
+                                menuExpanded = false
+                                viewModel.clearArchived()
+                            }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -167,13 +167,6 @@ fun PlaylistScreen(
     }
 }
 
-/**
- * 听单卡片 — 第一版设计语言：
- *   - AppTokens.RadiusHero(24dp) 圆角 surface 卡片
- *   - 96dp 封面（AppTokens.RadiusCover 16dp 圆角）
- *   - 双行：标题（衬线 Semibold）+ 副标题（onSurfaceVariant）
- *   - 进度条（仅在有进度时显示）：AppTokens.ProgressTrackHero(6dp) + primary 色 + 右侧百分比
- */
 @Composable
 private fun PlaylistCard(record: BookRecord, onClick: () -> Unit, onLongClick: () -> Unit) {
     val progress = if (record.durationMs > 0L) {

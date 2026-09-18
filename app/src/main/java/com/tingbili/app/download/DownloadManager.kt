@@ -14,16 +14,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 
-/**
- * 离线下载管理：分集音频下载到 filesDir/downloads（无需存储权限），
- * 用 JSON 索引文件记录已下载分集（避免引入 Room 迁移）。进度经 tasks 暴露给 UI。
- *
- * 关键设计：
- *   - 复用 AppContainer 注入的 OkHttpClient（已带 UA/Referer/Cookie 全局拦截器）
- *   - 多 CDN 候选 URL（upcdn → upgcxcode）顺序重试
- *   - auid 路径解析失败时自动 fallback 到 bvid+cid DASH
- *   - 请求带 Range: bytes=0- 让 CDN 返回 206，便于流式下载与失败即时重试
- */
 class DownloadManager(
     private val context: Context,
     private val playRepo: PlayRepository?,
@@ -33,14 +23,14 @@ class DownloadManager(
     private val dir = File(context.filesDir, "downloads").apply { mkdirs() }
     private val indexFile = File(dir, "index.json")
 
+    // 不用传入的 httpClient：它的拦截器 Cookie 是初始化快照，会覆盖我们实时读的 cookie。
     private val client: OkHttpClient by lazy {
-        httpClient ?: OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
-    /** 从 CookieStore 读 cookie；失败时退回临时 buvid3。OkHttp client 的拦截器会补 UA/Referer。 */
     private fun cookieHeader(): String {
         val live = runCatching {
             runBlocking { cookieStore?.cookieHeader() ?: "" }
@@ -88,15 +78,6 @@ class DownloadManager(
 
     fun localFile(item: Item): File = File(dir, item.fileName)
 
-    /**
-     * 下载一集音频。
-     *
-     * 流程：
-     *   1) playRepo.resolveAudioUrl 解析首个候选 URL
-     *   2) 失败时尝试 playRepo.candidates() 拉多 CDN 候选，逐个 GET 重试
-     *   3) auid 单独失败时通过 service.pagelist 反查 bvid+cid 再走 DASH（按入参 bookId 推断 bvid）
-     *   4) 任一 URL 成功即写入本地，索引 + 进度
-     */
     suspend fun download(
         recordId: String, bookTitle: String, cover: String,
         bvid: String?, cid: Long?, auid: Long?, partTitle: String
@@ -114,7 +95,6 @@ class DownloadManager(
         _tasks.value = _tasks.value + (key to TaskState.Running(0, null))
         val fileName = buildFileName(bookTitle, partTitle, key)
 
-        // 解析候选 URL：先按入参解析，再尝试播放库反查 bvid+cid
         val candidates = resolveCandidates(repo, bvid, cid, auid, recordId)
         if (candidates.isEmpty()) {
             val msg = "未拿到可用音频 URL（bvid=${bvid ?: "空"} cid=${cid ?: "空"} auid=${auid ?: "空"}；常见原因：未登录 → 设置里粘 SESSDATA 后重试）"
@@ -137,28 +117,18 @@ class DownloadManager(
         return false
     }
 
-    /**
-     * 解析下载候选 URL 列表。
-     * - 已有 bvid+cid → candidates(bvid,cid) 多 CDN
-     * - 仅有 auid     → audioApi.url(auid)（如有）
-     * - 若 auid 单独失败：通过记录 id 推断 bvid 重新 pagelist 拿 cid，再走 DASH
-     */
     private suspend fun resolveCandidates(
         repo: PlayRepository,
         bvid: String?, cid: Long?, auid: Long?,
         recordId: String
     ): List<String> {
-        // 只调一次 playUrl：先 resolveAudioUrl 再 candidates 会二次请求同视频，
-        // B 站短时间内第二次 playUrl 触发风控返回空 → 一直"未拿到可用 URL"
         val multi = repo.candidates(bvid, cid).toMutableList()
 
-        // DASH 没拿到且有 auid → 走音频区直链
         if (multi.isEmpty() && auid != null && auid > 0L) {
             val au = repo.resolveAudioUrl(null, null, auid)
             if (!au.isNullOrBlank()) multi.add(au)
         }
 
-        // 兜底：recordId="video:BVxxx" 时从 ID 推断 bvid 再 pagelist
         if (multi.isEmpty() && recordId.startsWith("video:") && bvid.isNullOrBlank()) {
             val guessedBvid = recordId.removePrefix("video:")
             runCatching {
@@ -180,10 +150,16 @@ class DownloadManager(
         recordId: String, bvid: String?, cid: Long?, auid: Long?, partTitle: String
     ): Boolean {
         return try {
-            // 不手动设置 Referer/UA/Cookie：client 已带全局拦截器统一加登录态，
-            // 手动覆盖会把 SESSDATA 冲成临时 buvid3 导致 CDN 403。只补 Range。
+            val referer = if (!bvid.isNullOrBlank()) {
+                "https://www.bilibili.com/video/$bvid"
+            } else {
+                "https://www.bilibili.com/"
+            }
             val req = Request.Builder().url(url)
                 .header("Range", "bytes=0-")
+                .header("Referer", referer)
+                .header("Cookie", cookieHeader())
+                .header("User-Agent", UA)
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
@@ -244,7 +220,6 @@ class DownloadManager(
         }
     }
 
-    /** 删除一个已下载分集（文件 + 索引） */
     fun delete(key: String) {
         val item = _index.value.firstOrNull { it.key == key } ?: return
         runCatching { localFile(item).delete() }
@@ -252,7 +227,6 @@ class DownloadManager(
         persist()
     }
 
-    /** 清空所有已下载分集（用于"全部删除"按钮），返回被删除的字节数 */
     fun deleteAll(): Long {
         val total = _index.value.sumOf { it.sizeBytes }
         _index.value.forEach { runCatching { localFile(it).delete() } }
@@ -261,7 +235,6 @@ class DownloadManager(
         return total
     }
 
-    /** 清理失败/中断的残留任务状态 */
     fun clearTask(key: String) {
         _tasks.value = _tasks.value - key
     }
@@ -289,7 +262,6 @@ class DownloadManager(
         const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         val json = Json { ignoreUnknownKeys = true }
 
-        /** 空壳下载管理器：playRepo 为 null，所有下载请求会立刻失败但不抛异常。用于 AppContainer 兜底 */
         fun empty(context: Context): DownloadManager = DownloadManager(context, null)
     }
 }
