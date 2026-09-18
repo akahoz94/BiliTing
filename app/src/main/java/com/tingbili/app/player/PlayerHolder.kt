@@ -83,7 +83,7 @@ class PlayerHolder(
         .setDefaultRequestProperties(
             mapOf(
                 "Referer" to "https://www.bilibili.com/",
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             )
         )
 
@@ -171,10 +171,6 @@ class PlayerHolder(
         }
     }
 
-    /**
-     * 开始播放。startIndex 指定队列中要播的集索引，audioUrl 是该集已解析的真实 URL。
-     * 其他集用 placeholder，切到时再异步解析。
-     */
     fun play(
         record: BookRecord,
         audioUrl: String,
@@ -260,7 +256,6 @@ class PlayerHolder(
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
 
-    /** seekTo 后如果之前在播放就继续播放，暂停状态保持暂停 */
     fun seekTo(ms: Long) {
         val wasPlaying = runCatching { player.isPlaying }.getOrDefault(false)
         player.seekTo(ms)
