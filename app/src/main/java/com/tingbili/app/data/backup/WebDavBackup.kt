@@ -38,13 +38,17 @@ class WebDavBackup(
     @Serializable
     data class BackupPayload(val version: Int = 1, val records: List<BookRecord>, val settings: SettingsSnapshot? = null)
 
+    private fun authHeader(): String = "Basic " + android.util.Base64.encodeToString(
+        "$user:$pass".toByteArray(), android.util.Base64.NO_WRAP
+    )
+
     suspend fun backup(records: List<BookRecord>, settings: SettingsSnapshot? = null): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val json = Json.encodeToString(BackupPayload(records = records, settings = settings))
             val (cipherText, iv) = aesEncrypt(json.toByteArray(Charsets.UTF_8), backupPass.toKey())
             val body = (iv + cipherText)
             val req = Request.Builder().url(remoteUrl)
-                    .header("Authorization", Credentials.basic(user, pass))
+                    .header("Authorization", authHeader())
                     .put(body.toRequestBody("application/octet-stream".toMediaTypeOrNull()))
                     .build()
             client.newCall(req).execute().use { resp ->
@@ -56,7 +60,7 @@ class WebDavBackup(
     suspend fun restore(): Result<BackupPayload> = withContext(Dispatchers.IO) {
         runCatching {
             val req = Request.Builder().url(remoteUrl)
-                    .header("Authorization", Credentials.basic(user, pass))
+                    .header("Authorization", authHeader())
                     .get().build()
             client.newCall(req).execute().use { resp ->
                 if (resp.code == 404) return@use BackupPayload(records = emptyList())
@@ -86,16 +90,27 @@ class WebDavBackup(
 
     private fun String.toKey(): ByteArray = MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8))
 
-    suspend fun ping(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun ping(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         runCatching {
+            val auth = authHeader()
             Log.i("WebDavBackup", "ping: url=$baseUrl user=$user passLen=${pass.length}")
-            val req = Request.Builder().url(baseUrl)
-                    .header("Authorization", Credentials.basic(user, pass))
-                    .method("OPTIONS", null).build()
+            // 直接 PUT 一个测试文件，最可靠
+            val testUrl = baseUrl.trimEnd('/') + "/bilitest_ping.txt"
+            val req = Request.Builder().url(testUrl)
+                    .header("Authorization", auth)
+                    .put("ping".toRequestBody("text/plain".toMediaTypeOrNull()))
+                    .build()
             client.newCall(req).execute().use {
-                Log.i("WebDavBackup", "ping resp: ${it.code} ${it.message}")
-                it.isSuccessful || it.code == 207
+                Log.i("WebDavBackup", "ping PUT resp: ${it.code} ${it.message}")
+                if (it.isSuccessful || it.code == 201 || it.code == 204) {
+                    true to "连接成功"
+                } else {
+                    false to "HTTP ${it.code}: ${it.message}"
+                }
             }
-        }.onFailure { Log.e("WebDavBackup", "ping failed", it) }.getOrDefault(false)
+        }.getOrElse {
+            Log.e("WebDavBackup", "ping failed", it)
+            false to (it.message ?: "未知错误")
+        }
     }
 }

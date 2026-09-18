@@ -138,8 +138,8 @@ class SettingsViewModel(
         }
         _busy.value = true
         viewModelScope.launch {
-            val ok = WebDavBackup(baseUrl, user, webdavPass.value, "").ping()
-            _msg.value = if (ok) "连接成功 ✓" else "连接失败：检查地址和用户名/密码"
+            val (ok, detail) = WebDavBackup(baseUrl, user, webdavPass.value, "").ping()
+            _msg.value = if (ok) "连接成功 ✓" else "连接失败：$detail"
             _busy.value = false
         }
     }
