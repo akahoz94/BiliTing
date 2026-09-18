@@ -144,7 +144,7 @@ class AppContainer(val app: BiliTingApplication) {
     val searchApi = SearchApi(biliService, wbiKeys)
     val searchRepo = SearchRepository(searchApi)
     val authorApi = AuthorApi(biliService, wbiKeys)
-    val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService)
+    val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService, app)
     val downloadManager: com.tingbili.app.download.DownloadManager = runCatching {
         val client = buildHttpClient(cookieProvider)
         com.tingbili.app.download.DownloadManager(app, playRepo, app.cookieStore, client)
