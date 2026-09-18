@@ -17,39 +17,18 @@ class PlayRepository(
 ) {
     private val sniffer by lazy { context?.let { WebViewAudioSniffer(it) } }
 
-<<<<<<< HEAD
-    /**
-     * 解析音频 URL。
-     *
-     * 优先 WebView 嗅探（仿"我的听书"，浏览器指纹不风控），
-     * 失败再回退直接调 playurl API。
-     */
-    suspend fun resolveAudioUrl(bvid: String?, cid: Long?, auid: Long?): String? {
-        // 视频：直连 API 优先（快），失败再 WebView 嗅探兜底
-        if (bvid != null && bvid.isNotBlank() && cid != null && cid > 0L) {
-            // 1) DASH 直链（首选，快）
-=======
     suspend fun resolveAudioUrl(bvid: String?, cid: Long?, auid: Long?): String? {
         if (bvid != null && bvid.isNotBlank() && cid != null && cid > 0L) {
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
             val dash = playUrlApi.audioUrl(bvid, cid)
             if (!dash.isNullOrBlank()) {
                 Log.i(TAG, "playUrl API 成功: $bvid")
                 return dash
             }
-<<<<<<< HEAD
-            // 2) legacy durl
-=======
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
             val legacy = playUrlApi.legacyDurl(bvid, cid)
             if (!legacy.isNullOrBlank()) {
                 Log.i(TAG, "legacy durl 成功: $bvid")
                 return legacy
             }
-<<<<<<< HEAD
-            // 3) WebView 嗅探兜底（API 被风控时用）
-=======
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
             sniffer?.let { s ->
                 runCatching { s.sniff(bvid, cid) }
                     .onSuccess { url ->
@@ -69,24 +48,13 @@ class PlayRepository(
 
     suspend fun candidates(bvid: String?, cid: Long?): List<String> {
         if (bvid == null || cid == null || cid <= 0L) return emptyList()
-<<<<<<< HEAD
-        // 跟播放一致：API 优先（ExoPlayer 验证过的URL），WebView 兜底
-        val apiUrls = playUrlApi.candidates(bvid, cid)
-        if (apiUrls.isNotEmpty()) return apiUrls
-        // API 失败时用 WebView 嗅探
-=======
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
         sniffer?.let { s ->
             runCatching { s.sniff(bvid, cid) }
                 .getOrNull()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { return listOf(it) }
         }
-<<<<<<< HEAD
-        return emptyList()
-=======
         return playUrlApi.candidates(bvid, cid)
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
     }
 
     suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<PartItem>>? {
@@ -109,8 +77,4 @@ class PlayRepository(
     companion object {
         private const val TAG = "PlayRepository"
     }
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864

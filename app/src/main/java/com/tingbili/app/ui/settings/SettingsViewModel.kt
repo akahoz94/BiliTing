@@ -107,10 +107,6 @@ class SettingsViewModel(
             val records = app.container.libraryRepo.all()
             val snapshot = store.exportSnapshot()
             val r = WebDavBackup(baseUrl, user, webdavPass.value, pass).backup(records, snapshot)
-<<<<<<< HEAD
-=======
-            _msg.value = r.fold({ "已备份 ${records.size} 条 + 设置" }, { "备份失败：${it.message}" })
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
             _busy.value = false
         }
     }

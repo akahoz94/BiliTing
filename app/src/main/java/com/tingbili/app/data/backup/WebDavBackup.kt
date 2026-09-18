@@ -36,15 +36,7 @@ class WebDavBackup(
     private val remoteUrl: String get() = baseUrl.trimEnd('/') + "/" + remoteFile
 
     @Serializable
-<<<<<<< HEAD
-    data class BackupPayload(
-        val version: Int = 1,
-        val records: List<BookRecord>,
-        val settings: SettingsSnapshot? = null
-    )
-=======
     data class BackupPayload(val version: Int = 1, val records: List<BookRecord>, val settings: SettingsSnapshot? = null)
->>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
 
     suspend fun backup(records: List<BookRecord>, settings: SettingsSnapshot? = null): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -96,10 +88,14 @@ class WebDavBackup(
 
     suspend fun ping(): Boolean = withContext(Dispatchers.IO) {
         runCatching {
+            Log.i("WebDavBackup", "ping: url=$baseUrl user=$user passLen=${pass.length}")
             val req = Request.Builder().url(baseUrl)
                     .header("Authorization", Credentials.basic(user, pass))
                     .method("OPTIONS", null).build()
-            client.newCall(req).execute().use { it.isSuccessful || it.code == 207 }
-        }.getOrDefault(false)
+            client.newCall(req).execute().use {
+                Log.i("WebDavBackup", "ping resp: ${it.code} ${it.message}")
+                it.isSuccessful || it.code == 207
+            }
+        }.onFailure { Log.e("WebDavBackup", "ping failed", it) }.getOrDefault(false)
     }
 }
