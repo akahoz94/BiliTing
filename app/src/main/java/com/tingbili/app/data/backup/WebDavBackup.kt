@@ -94,15 +94,15 @@ class WebDavBackup(
         runCatching {
             val auth = authHeader()
             Log.i("WebDavBackup", "ping: url=$baseUrl user=$user passLen=${pass.length}")
-            // 直接 PUT 一个测试文件，最可靠
-            val testUrl = baseUrl.trimEnd('/') + "/bilitest_ping.txt"
+            // 用 OPTIONS 测试连接（坚果云 OPTIONS 200 = 认证通过）
+            val testUrl = baseUrl.trimEnd('/') + "/"
             val req = Request.Builder().url(testUrl)
+                    .method("OPTIONS", null)
                     .header("Authorization", auth)
-                    .put("ping".toRequestBody("text/plain".toMediaTypeOrNull()))
                     .build()
             client.newCall(req).execute().use {
-                Log.i("WebDavBackup", "ping PUT resp: ${it.code} ${it.message}")
-                if (it.isSuccessful || it.code == 201 || it.code == 204) {
+                Log.i("WebDavBackup", "ping OPTIONS resp: ${it.code} ${it.message}")
+                if (it.isSuccessful || it.code == 200 || it.code == 204) {
                     true to "连接成功"
                 } else {
                     false to "HTTP ${it.code}: ${it.message}"
