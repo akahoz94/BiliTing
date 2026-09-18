@@ -1,4 +1,4 @@
-package com.tingbili.app.download
+﻿package com.tingbili.app.download
 
 import android.content.Context
 import android.util.Log

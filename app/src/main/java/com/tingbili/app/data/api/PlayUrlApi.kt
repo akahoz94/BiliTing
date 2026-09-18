@@ -1,4 +1,4 @@
-package com.tingbili.app.data.api
+﻿package com.tingbili.app.data.api
 
 import android.util.Log
 
@@ -6,6 +6,8 @@ class PlayUrlApi(
     private val service: BiliApiService,
     private val keys: WbiKeyStore
 ) {
+    @Volatile var lastError: String = ""
+
     /**
      * 返回视频 DASH 音频流 URL；按音频质量 id 降序选择（30280->30232->30216->30251 等）。
      *
@@ -36,17 +38,20 @@ class PlayUrlApi(
                 wRid = signed.getValue("w_rid"), wts = signed.getValue("wts")
             )
         } catch (t: Throwable) {
-            Log.w(TAG, "[DL] playUrl 网络异常 bvid=$bvid cid=$cid: ${t.message}")
+            lastError = "网络异常: ${t.message}"
+            Log.w(TAG, "[DL] $lastError bvid=$bvid cid=$cid")
             return emptyList()
         }
         // 业务码非 0：B 站返回"未登录/风控/视频不存在"等
         if (resp.code != 0) {
-            Log.w(TAG, "[DL] playUrl 业务码异常 code=${resp.code} msg=${resp.message} bvid=$bvid cid=$cid")
+            lastError = "playUrl code=${resp.code}: ${resp.message}"
+            Log.w(TAG, "[DL] $lastError bvid=$bvid cid=$cid")
             return emptyList()
         }
         val audios = resp.data?.dash?.audio.orEmpty().sortedByDescending { it.id }
         val first = audios.firstOrNull() ?: run {
-            Log.w(TAG, "[DL] playUrl 无 dash.audio bvid=$bvid cid=$cid (响应里没给音频流)")
+            lastError = "playUrl 返回了但无 dash.audio"
+            Log.w(TAG, "[DL] $lastError bvid=$bvid cid=$cid")
             return emptyList()
         }
         val raw = first.baseUrl.takeIf { it.isNotBlank() } ?: first.baseUrl2

@@ -107,6 +107,7 @@ fun SettingsScreen(
     val busy by viewModel.busy.collectAsState()
     val coverCacheSize by viewModel.coverCacheSize.collectAsState()
     val downloadCacheSize by viewModel.downloadCacheSize.collectAsState()
+    val playCacheSize by viewModel.playCacheSize.collectAsState()
     val msg by viewModel.msg.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.refreshCacheSizes() }

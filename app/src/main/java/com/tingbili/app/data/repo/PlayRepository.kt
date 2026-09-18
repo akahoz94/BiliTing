@@ -1,4 +1,4 @@
-package com.tingbili.app.data.repo
+﻿package com.tingbili.app.data.repo
 
 import android.content.Context
 import android.util.Log
@@ -48,13 +48,16 @@ class PlayRepository(
 
     suspend fun candidates(bvid: String?, cid: Long?): List<String> {
         if (bvid == null || cid == null || cid <= 0L) return emptyList()
+        // 先试API（快），失败再WebView兜底
+        val apiResults = playUrlApi.candidates(bvid, cid)
+        if (apiResults.isNotEmpty()) return apiResults
         sniffer?.let { s ->
             runCatching { s.sniff(bvid, cid) }
                 .getOrNull()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { return listOf(it) }
         }
-        return playUrlApi.candidates(bvid, cid)
+        return emptyList()
     }
 
     suspend fun resolveVideo(bvid: String): Pair<BookRecord, List<PartItem>>? {

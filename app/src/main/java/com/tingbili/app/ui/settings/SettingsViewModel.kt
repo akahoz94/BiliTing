@@ -1,4 +1,4 @@
-package com.tingbili.app.ui.settings
+﻿package com.tingbili.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -146,6 +146,25 @@ class SettingsViewModel(
         }
     }
 
+    fun clearPlayCache() {
+        _busy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            var freed = 0L
+            runCatching {
+                app.cacheDir.listFiles()?.forEach { f ->
+                    if (f.isFile) { freed += f.length(); f.delete() }
+                    else if (f.isDirectory && f.name !in listOf("coverCache", "img_cache")) {
+                        freed += f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                        f.deleteRecursively(); f.mkdirs()
+                    }
+                }
+            }
+            _playCacheSize.value = formatSize(0)
+            _busy.value = false
+            _msg.value = "在线播放缓存已清除（释放 ${formatSize(freed)}）"
+        }
+    }
+
     fun consumeMsg() { _msg.value = null }
 
     // ============ 缓存管理 ============
@@ -154,6 +173,8 @@ class SettingsViewModel(
     val coverCacheSize: StateFlow<String> = _coverCacheSize.asStateFlow()
     private val _downloadCacheSize = MutableStateFlow("")
     val downloadCacheSize: StateFlow<String> = _downloadCacheSize.asStateFlow()
+    private val _playCacheSize = MutableStateFlow("")
+    val playCacheSize: StateFlow<String> = _playCacheSize.asStateFlow()
 
     fun refreshCacheSizes() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -178,6 +199,23 @@ class SettingsViewModel(
         runCatching {
             val dir = java.io.File(app.filesDir, "downloads")
             if (dir.exists()) total += dir.walkTopDown().filter { it.isFile && it.name != "index.json" }.sumOf { it.length() }
+        }
+        return total
+    }
+
+    private fun playCacheBytes(): Long {
+        var total = 0L
+        runCatching {
+            // ExoPlayer在线缓存 + 系统HTTP缓存
+            val dir = java.io.File(app.cacheDir, "exo_cache")
+            if (dir.exists()) total += dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            // 整个cacheDir除了coverCache和img_cache
+            app.cacheDir.listFiles()?.forEach { f ->
+                if (f.isFile) total += f.length()
+                else if (f.isDirectory && f.name !in listOf("coverCache", "img_cache", "exo_cache")) {
+                    total += f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                }
+            }
         }
         return total
     }
