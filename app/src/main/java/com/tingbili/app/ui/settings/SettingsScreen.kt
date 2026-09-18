@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.FolderDelete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
@@ -111,7 +110,6 @@ fun SettingsScreen(
     val rememberSpeed by viewModel.rememberSpeedPerAuthor.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val coverCacheSize by viewModel.coverCacheSize.collectAsState()
-    val downloadCacheSize by viewModel.downloadCacheSize.collectAsState()
     val playCacheSize by viewModel.playCacheSize.collectAsState()
     val msg by viewModel.msg.collectAsState()
 
@@ -246,13 +244,6 @@ fun SettingsScreen(
                             title = "清除封面缓存",
                             subtitle = "当前占用 $coverCacheSize",
                             onClick = { viewModel.clearCoverCache() }
-                        )
-                        Divider()
-                        NavRow(
-                            icon = Icons.Filled.FolderDelete,
-                            title = "清除下载音频",
-                            subtitle = "当前占用 $downloadCacheSize",
-                            onClick = { viewModel.clearDownloadCache() }
                         )
                         Divider()
                         NavRow(

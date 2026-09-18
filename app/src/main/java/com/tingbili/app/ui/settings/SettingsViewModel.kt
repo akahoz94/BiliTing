@@ -64,8 +64,6 @@ class SettingsViewModel(
     // ============ 缓存管理（声明必须在 init 之前，防止 IO 协程先于属性初始化执行） ============
     private val _coverCacheSize = MutableStateFlow("")
     val coverCacheSize: StateFlow<String> = _coverCacheSize.asStateFlow()
-    private val _downloadCacheSize = MutableStateFlow("")
-    val downloadCacheSize: StateFlow<String> = _downloadCacheSize.asStateFlow()
     private val _playCacheSize = MutableStateFlow("")
     val playCacheSize: StateFlow<String> = _playCacheSize.asStateFlow()
 
@@ -218,7 +216,6 @@ class SettingsViewModel(
     fun refreshCacheSizes() {
         viewModelScope.launch(Dispatchers.IO) {
             _coverCacheSize.value = formatSize(coverCacheBytes())
-            _downloadCacheSize.value = formatSize(downloadCacheBytes())
             _playCacheSize.value = formatSize(playCacheBytes())
         }
     }
@@ -230,15 +227,6 @@ class SettingsViewModel(
             if (dir.exists()) total += dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
             val imgDir = java.io.File(app.cacheDir, "img_cache")
             if (imgDir.exists()) total += imgDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        }
-        return total
-    }
-
-    private fun downloadCacheBytes(): Long {
-        var total = 0L
-        runCatching {
-            val dir = java.io.File(app.filesDir, "downloads")
-            if (dir.exists()) total += dir.walkTopDown().filter { it.isFile && it.name != "index.json" }.sumOf { it.length() }
         }
         return total
     }
@@ -285,22 +273,6 @@ class SettingsViewModel(
         }
     }
 
-    fun clearDownloadCache() {
-        _busy.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            var freed = 0L
-            runCatching {
-                val dir = java.io.File(app.filesDir, "downloads")
-                if (dir.exists()) {
-                    freed = dir.walkTopDown().filter { it.isFile && it.name != "index.json" }.sumOf { it.length() }
-                    dir.walkTopDown().filter { it.isFile && it.name != "index.json" }.forEach { it.delete() }
-                }
-            }
-            _downloadCacheSize.value = formatSize(0)
-            _busy.value = false
-            _msg.value = "下载音频已清除（释放 ${formatSize(freed)}）"
-        }
-    }
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
