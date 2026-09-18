@@ -35,6 +35,7 @@ class PlayerHolder(
     private var _trackSelector: DefaultTrackSelector? = null
     private var _mediaControllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
+    var currentAudioUrl: String = ""
 
     val player: ExoPlayer
         get() = _player ?: ensurePlayer()
@@ -83,7 +84,7 @@ class PlayerHolder(
         .setDefaultRequestProperties(
             mapOf(
                 "Referer" to "https://www.bilibili.com/",
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
         )
 
@@ -220,6 +221,7 @@ class PlayerHolder(
                     )
                 }
             }
+            currentAudioUrl = audioUrl
             player.setMediaItems(items, startIndex, positionMs)
         } else {
             val firstItem = MediaItem.Builder()
@@ -227,6 +229,7 @@ class PlayerHolder(
                 .setMediaId(record.id)
                 .setMediaMetadata(metaBuilder.build())
                 .build()
+            currentAudioUrl = audioUrl
             player.setMediaItem(firstItem)
             player.seekTo(positionMs)
         }
