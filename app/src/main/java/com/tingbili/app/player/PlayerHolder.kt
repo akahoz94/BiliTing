@@ -171,10 +171,6 @@ class PlayerHolder(
         }
     }
 
-    /**
-     * 开始播放。startIndex 指定队列中要播的集索引，audioUrl 是该集已解析的真实 URL。
-     * 其他集用 placeholder，切到时再异步解析。
-     */
     fun play(
         record: BookRecord,
         audioUrl: String,
@@ -266,7 +262,6 @@ class PlayerHolder(
     fun togglePlay() = if (player.isPlaying) player.pause() else player.play()
     fun setSpeed(speed: Float) { player.playbackParameters = PlaybackParameters(speed) }
 
-    /** seekTo 后如果之前在播放就继续播放，暂停状态保持暂停 */
     fun seekTo(ms: Long) {
         val wasPlaying = runCatching { player.isPlaying }.getOrDefault(false)
         player.seekTo(ms)

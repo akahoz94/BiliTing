@@ -23,7 +23,6 @@ class DownloadManager(
     private val dir = File(context.filesDir, "downloads").apply { mkdirs() }
     private val indexFile = File(dir, "index.json")
 
-    // 不用传入的 httpClient：它的拦截器 Cookie 是初始化快照，会覆盖我们实时读的 cookie。
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
@@ -238,7 +237,7 @@ class DownloadManager(
 
     private fun buildFileName(bookTitle: String, partTitle: String, key: String): String {
         val base = (if (partTitle.isNotBlank()) partTitle else bookTitle.ifBlank { key })
-        val safe = base.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().take(48)
+        val safe = base.replace(Regex("[\\/:*?\"<>|]"), "_").trim().take(48)
         return "${if (safe.isBlank()) "part" else safe}-${key.hashCode().and(0xffff)}.m4a"
     }
 
