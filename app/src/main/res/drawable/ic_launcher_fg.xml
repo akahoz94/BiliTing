@@ -4,45 +4,36 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- 耳机头带 -->
     <path
-        android:pathData="M 34,58 C 34,34 74,34 74,58"
+        android:pathData="M 36,56 C 36,36 72,36 72,56"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="7"
+        android:strokeWidth="6"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
-
-    <!-- 左耳罩（圆角矩形） -->
     <path
-        android:pathData="M 30,56 h 12 a 6,6 0 0 1 6,6 v 14 a 6,6 0 0 1 -6,6 h -12 a 6,6 0 0 1 -6,-6 v -14 a 6,6 0 0 1 6,-6 z"
+        android:pathData="M 32,54 a 7,7 0 0 1 7,-7 h 2 a 7,7 0 0 1 7,7 v 18 a 7,7 0 0 1 -7,7 h -2 a 7,7 0 0 1 -7,-7 z"
         android:fillColor="#FFFFFF" />
-
-    <!-- 右耳罩（圆角矩形） -->
     <path
-        android:pathData="M 66,56 h 12 a 6,6 0 0 1 6,6 v 14 a 6,6 0 0 1 -6,6 h -12 a 6,6 0 0 1 -6,-6 v -14 a 6,6 0 0 1 6,-6 z"
+        android:pathData="M 66,54 a 7,7 0 0 1 7,-7 h 2 a 7,7 0 0 1 7,7 v 18 a 7,7 0 0 1 -7,7 h -2 a 7,7 0 0 1 -7,-7 z"
         android:fillColor="#FFFFFF" />
-
-    <!-- 均衡器波形：4条竖线，中间高两边低 -->
     <path
-        android:pathData="M 46,52 L 46,58"
+        android:pathData="M 48,58 L 48,70"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3.5"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M 51,46 L 51,58"
+        android:pathData="M 53,52 L 53,70"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3.5"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M 56,44 L 56,58"
+        android:pathData="M 58,48 L 58,70"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3.5"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M 61,48 L 61,58"
+        android:pathData="M 63,54 L 63,70"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3.5"
         android:strokeLineCap="round" />
-
 </vector>
