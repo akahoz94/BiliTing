@@ -36,11 +36,15 @@ class WebDavBackup(
     private val remoteUrl: String get() = baseUrl.trimEnd('/') + "/" + remoteFile
 
     @Serializable
+<<<<<<< HEAD
     data class BackupPayload(
         val version: Int = 1,
         val records: List<BookRecord>,
         val settings: SettingsSnapshot? = null
     )
+=======
+    data class BackupPayload(val version: Int = 1, val records: List<BookRecord>, val settings: SettingsSnapshot? = null)
+>>>>>>> 82b0fb035abb5855eb79013f3bf6f14979a12864
 
     suspend fun backup(records: List<BookRecord>, settings: SettingsSnapshot? = null): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
