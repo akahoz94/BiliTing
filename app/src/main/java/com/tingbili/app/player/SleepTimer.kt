@@ -1,5 +1,7 @@
 package com.tingbili.app.player
 
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,9 +22,15 @@ class SleepTimer(
 ) {
     private var job: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var endOfTrackMode = false
     private var lastPlaying = false
     private var totalMs: Long = 0L
+
+    /** 所有回调必须 post 到主线程：ExoPlayer 的 pause()/setVolume() 非主线程调用直接抛异常 */
+    private fun onMain(block: () -> Unit) {
+        mainHandler.post(block)
+    }
 
     fun start(minutes: Int) {
         stop()
@@ -35,11 +43,13 @@ class SleepTimer(
             val steps = 30
             val stepDelay = (fadeOutMs / steps).coerceAtLeast(100L)
             for (i in steps downTo 0) {
-                setVolume(i / steps.toFloat())
+                onMain { setVolume(i / steps.toFloat()) }
                 delay(stepDelay)
             }
-            setVolume(0f)
-            onFire()
+            onMain {
+                setVolume(0f)
+                onFire()
+            }
         }
     }
 
@@ -53,7 +63,7 @@ class SleepTimer(
                 delay(500)
                 val now = isPlayingProvider()
                 if (lastPlaying && !now) {
-                    onFire()
+                    onMain { onFire() }
                     break
                 }
                 lastPlaying = now
@@ -66,7 +76,7 @@ class SleepTimer(
         job = null
         endOfTrackMode = false
         // 停止时把音量恢复到 1.0，避免静音残留
-        setVolume(1f)
+        onMain { setVolume(1f) }
     }
 
     /** 取消时也不恢复音量（用于被新计时器覆盖） */
