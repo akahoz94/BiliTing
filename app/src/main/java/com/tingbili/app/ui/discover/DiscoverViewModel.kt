@@ -104,6 +104,20 @@ class DiscoverViewModel(
         load(category, if (feed.items.isEmpty()) 1 else feed.page + 1)
     }
 
+    /**
+     * 「换一批」：清掉当前分类的内容，从**上一批的下一页**继续拉。
+     *
+     * 注意不能实现成"重新拉第 1 页" —— 同一个检索词的第 1 页永远返回同样那批内容，
+     * 点下去等于什么都没变。用户点这个按钮的意图就是"给我没见过的"。
+     */
+    fun shuffle(category: DiscoverCategory) {
+        val feed = _feeds.value[category.label] ?: return
+        if (feed.loading) return
+        val nextPage = (feed.page + 1).coerceAtLeast(2)
+        update(category.label) { it.copy(items = emptyList(), endReached = false, loading = false) }
+        load(category, nextPage, replace = true)
+    }
+
     private fun update(label: String, transform: (CategoryFeed) -> CategoryFeed) {
         _feeds.value = _feeds.value.toMutableMap().apply {
             this[label] = transform(this[label] ?: CategoryFeed())
@@ -114,7 +128,7 @@ class DiscoverViewModel(
      * 一个分类可能带多个检索词：并行走完再合并。
      * 合并顺序按"轮转交错"而不是一路接一路，免得同一个词的结果扎堆在前半屏。
      */
-    private fun load(category: DiscoverCategory, page: Int) {
+    private fun load(category: DiscoverCategory, page: Int, replace: Boolean = false) {
         val label = category.label
         update(label) { it.copy(loading = true) }
         viewModelScope.launch {
@@ -142,13 +156,17 @@ class DiscoverViewModel(
 
             val batch = interleave(lists)
             update(label) { old ->
-                val seen = if (page <= 1) emptySet() else old.items.map { it.stableKey() }.toSet()
-                val fresh = batch.filter { it.stableKey() !in seen }
-                    .distinctBy { it.stableKey() }
+                val fresh = if (page <= 1 || replace) {
+                    batch.distinctBy { it.stableKey() }
+                } else {
+                    val seen = old.items.map { it.stableKey() }.toSet()
+                    batch.filter { it.stableKey() !in seen }.distinctBy { it.stableKey() }
+                }
                 old.copy(
-                    items = if (page <= 1) fresh else old.items + fresh,
+                    items = if (page <= 1 || replace) fresh else old.items + fresh,
                     loading = false,
-                    endReached = fresh.isEmpty(),
+                    // 换批是"跳着往后取"，这一批空不等于后面没内容，别把续页锁死
+                    endReached = if (replace) false else fresh.isEmpty(),
                     page = page
                 )
             }

@@ -22,6 +22,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -83,18 +84,30 @@ fun DiscoverScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val selectedLabel = categories[pagerState.currentPage].label
-                categories.forEachIndexed { index, cat ->
-                    FilterChip(
-                        selected = cat.label == selectedLabel,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                        label = { Text(cat.label) }
-                    )
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val selectedLabel = categories[pagerState.currentPage].label
+                    categories.forEachIndexed { index, cat ->
+                        FilterChip(
+                            selected = cat.label == selectedLabel,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                            label = { Text(cat.label) }
+                        )
+                    }
                 }
+                // 「换一批」作用于当前分类：点一下换掉这一屏，滚到底仍然能继续往下续
+                val current = categories[pagerState.currentPage]
+                TextButton(
+                    onClick = { viewModel.shuffle(current) },
+                    enabled = !(feeds[current.label]?.loading ?: false)
+                ) { Text("换一批") }
             }
 
             HorizontalPager(
