@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -48,6 +49,9 @@ class SettingsStore(private val context: Context) {
         private const val TAG = "SettingsStore"
         const val MIN_GAIN = 0.5f
         const val MAX_GAIN = 3.0f
+
+        /** 云端备份默认目录（历史版本的硬编码值，保持兼容） */
+        const val DEFAULT_CLOUD_DIR = "BiliTing"
     }
 
     private val dataStore = context.dataStore
@@ -87,6 +91,17 @@ class SettingsStore(private val context: Context) {
     private val keyShelfFolders = stringPreferencesKey("shelf_folders")
     /** 每日收听时长：encode "epochDay:ms;epochDay:ms"（D4 日历统计数据源） */
     private val keyListeningMs = stringPreferencesKey("listening_ms")
+    /** 启动时自动同步听单/收藏/进度/设置 */
+    private val keyAutoSyncEnabled = booleanPreferencesKey("auto_sync_enabled")
+    /** 上次成功同步的时间戳（0 = 从未同步过） */
+    private val keyLastSyncAt = longPreferencesKey("last_sync_at")
+    /** 云端备份目录（WebDAV 下的子路径，默认 BiliTing；支持 "a/b" 多级） */
+    private val keyCloudDir = stringPreferencesKey("webdav_cloud_dir")
+    /**
+     * 历史「备份加密密码」：升级前那套独立加密密码。
+     * 新版不再需要它，但老云端备份是它加密的 —— 留个字段让用户填一次就能把旧备份打开。
+     */
+    private val keyLegacyBackupPass = stringPreferencesKey("legacy_backup_pass")
 
     // ---------- 统一容错：读失败 Log + 上报 + 回落默认值；不再静默吞掉 ----------
     private fun <T> Flow<T>.failSafe(name: String, fallback: T): Flow<T> = catch {
@@ -119,15 +134,37 @@ class SettingsStore(private val context: Context) {
     val autoNextEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextEnabled] ?: false }.failSafe("auto_next_enabled", false)
     val rememberSpeedPerAuthor: Flow<Boolean> = dataStore.data.map { it[keyRememberSpeedPerAuthor] ?: false }.failSafe("remember_speed_per_author", false)
     val playlistGroupMode: Flow<Int> = dataStore.data.map { it[keyPlaylistGroupMode] ?: 0 }.failSafe("playlist_group_mode", 0)
+    val autoSyncEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoSyncEnabled] ?: true }.failSafe("auto_sync_enabled", true)
+    val lastSyncAt: Flow<Long> = dataStore.data.map { it[keyLastSyncAt] ?: 0L }.failSafe("last_sync_at", 0L)
+
+    /** 云端备份目录：空白/含非法字符时回落默认值，避免拼出坏 URL */
+    val cloudDir: Flow<String> = dataStore.data.map {
+        sanitizeCloudDir(it[keyCloudDir] ?: "")
+    }.failSafe("webdav_cloud_dir", DEFAULT_CLOUD_DIR)
+
+    /** 历史备份密码（仅用于打开升级前的旧备份），默认空 */
+    val legacyBackupPass: Flow<String> = dataStore.data.map { it[keyLegacyBackupPass] ?: "" }
+        .failSafe("legacy_backup_pass", "")
+
+    /** 去掉首尾斜杠与空白；非法（空、含 ..）时用默认目录 */
+    private fun sanitizeCloudDir(raw: String): String {
+        val trimmed = raw.trim().trim('/').trim()
+        if (trimmed.isBlank()) return DEFAULT_CLOUD_DIR
+        if (trimmed.split('/').any { it == ".." || it.isBlank() }) return DEFAULT_CLOUD_DIR
+        return trimmed
+    }
 
     /**
-     * WebDAV 密码读取：优先读加密副本（webdav_pass_enc），
-     * 读不到再回退到旧版本遗留的明文副本（webdav_pass）——保证老用户升级后不丢密码。
+     * WebDAV 密码读取：明文优先，再回退历史 KeyStore 密文副本。
+     *
+     * 为什么放弃 KeyStore 加密：密钥存在 AndroidKeyStore，卸载 App 时被系统一并销毁，
+     * 密文即使跟着外置配置活下来也解不开 —— 对「重装不用重输」这个目标是负资产。
+     * 现存密文由 [migrateSecretsToPlaintext] 在启动时一次性转成明文。
      */
     val webdavPass: Flow<String> = dataStore.data.map { prefs ->
-        val enc = prefs[keyWebdavPassEnc]
-        if (!enc.isNullOrBlank()) SecretVault.decrypt(enc) ?: ""
-        else prefs[keyWebdavPass] ?: ""
+        val plain = prefs[keyWebdavPass]
+        if (!plain.isNullOrBlank()) plain
+        else prefs[keyWebdavPassEnc]?.let { SecretVault.decrypt(it) } ?: ""
     }.failSafe("webdav_pass", "")
 
     val searchHistory: Flow<List<String>> = dataStore.data.map {
@@ -148,12 +185,28 @@ class SettingsStore(private val context: Context) {
     suspend fun setAutoNextEnabled(v: Boolean) = write("auto_next_enabled") { it[keyAutoNextEnabled] = v }
     suspend fun setRememberSpeedPerAuthor(v: Boolean) = write("remember_speed_per_author") { it[keyRememberSpeedPerAuthor] = v }
     suspend fun setPlaylistGroupMode(v: Int) = write("playlist_group_mode") { it[keyPlaylistGroupMode] = v }
+    suspend fun setAutoSyncEnabled(v: Boolean) = write("auto_sync_enabled") { it[keyAutoSyncEnabled] = v }
+    suspend fun setLastSyncAt(v: Long) = write("last_sync_at") { it[keyLastSyncAt] = v }
+    suspend fun setCloudDir(v: String) = write("webdav_cloud_dir") { it[keyCloudDir] = v.trim() }
+    suspend fun setLegacyBackupPass(v: String) = write("legacy_backup_pass") { it[keyLegacyBackupPass] = v }
+
+    /** 一次性把外置同步配置写进本地（重装后自举用）；已有本地值时不覆盖 */
+    suspend fun applyExternalConfig(url: String, user: String, pass: String) {
+        write("apply_external_config") { prefs ->
+            if (prefs[keyWebdavUrl].isNullOrBlank()) prefs[keyWebdavUrl] = url
+            if (prefs[keyWebdavUser].isNullOrBlank()) prefs[keyWebdavUser] = user
+            if (prefs[keyWebdavPass].isNullOrBlank()) {
+                prefs[keyWebdavPass] = pass
+                prefs.remove(keyWebdavPassEnc)
+            }
+        }
+    }
     suspend fun setWebdavUrl(v: String) = write("webdav_url") { it[keyWebdavUrl] = v }
     suspend fun setWebdavUser(v: String) = write("webdav_user") { it[keyWebdavUser] = v }
 
     /**
-     * WebDAV 密码写入：优先 KeyStore 加密存储，并顺手清掉旧明文副本；
-     * 加密不可用时（极少）降级为明文，但会 Log 警示。空值表示清除。
+     * WebDAV 密码写入：直接存明文（理由见 [webdavPass]），并顺手清掉历史密文副本。
+     * 空值表示清除。
      */
     suspend fun setWebdavPass(v: String) = write("webdav_pass") { prefs ->
         if (v.isBlank()) {
@@ -161,15 +214,8 @@ class SettingsStore(private val context: Context) {
             prefs.remove(keyWebdavPassEnc)
             return@write
         }
-        val enc = SecretVault.encrypt(v)
-        if (enc != null) {
-            prefs[keyWebdavPassEnc] = enc
-            prefs.remove(keyWebdavPass)
-        } else {
-            Log.w(TAG, "keystore unavailable, fallback to plaintext webdav pass")
-            prefs[keyWebdavPass] = v
-            prefs.remove(keyWebdavPassEnc)
-        }
+        prefs[keyWebdavPass] = v
+        prefs.remove(keyWebdavPassEnc)
     }
 
     /** 每日收听时长（epochDay -> ms）。空值流，用于日历统计 hot-reload */
@@ -199,18 +245,18 @@ class SettingsStore(private val context: Context) {
     }
 
     /**
-     * 老版本遗留的明文密码自动升级为加密存储。
-     * 在 App 启动时调用一次即可，幂等；失败不影响使用（仍按明文回落读取）。
+     * 把历史遗留的 KeyStore 密文密码转回明文（幂等，启动时调一次）。
+     * 解不开（换了设备/清过 KeyStore）就原样保留，靠 [webdavPass] 的回退读取兜底。
      */
-    suspend fun migrateWebdavPassToEncrypted() {
+    suspend fun migrateSecretsToPlaintext() {
         runCatching {
             val prefs = dataStore.data.first()
-            val plain = prefs[keyWebdavPass]
-            if (!plain.isNullOrBlank() && prefs[keyWebdavPassEnc].isNullOrBlank()) {
-                val enc = SecretVault.encrypt(plain)
-                if (enc != null) {
-                    dataStore.edit { it[keyWebdavPassEnc] = enc; it.remove(keyWebdavPass) }
-                    Log.i(TAG, "webdav password migrated to encrypted storage")
+            val enc = prefs[keyWebdavPassEnc]
+            if (!enc.isNullOrBlank() && prefs[keyWebdavPass].isNullOrBlank()) {
+                val plain = SecretVault.decrypt(enc)
+                if (!plain.isNullOrBlank()) {
+                    dataStore.edit { it[keyWebdavPass] = plain; it.remove(keyWebdavPassEnc) }
+                    Log.i(TAG, "webdav password migrated to plaintext")
                 }
             }
         }.onFailure { Log.w(TAG, "password migration failed", it) }

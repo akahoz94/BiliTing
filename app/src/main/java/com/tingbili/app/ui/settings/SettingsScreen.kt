@@ -110,6 +110,10 @@ fun SettingsScreen(
     val webdavUrl by viewModel.webdavUrl.collectAsState()
     val webdavUser by viewModel.webdavUser.collectAsState()
     val hasSavedPass by viewModel.hasSavedWebdavPass.collectAsState()
+    val cloudDir by viewModel.cloudDir.collectAsState()
+    val legacyBackupPass by viewModel.legacyBackupPass.collectAsState()
+    val autoSyncEnabled by viewModel.autoSyncEnabled.collectAsState()
+    val lastSyncAt by viewModel.lastSyncAt.collectAsState()
     val immersiveMode by viewModel.immersiveMode.collectAsState()
     val paletteStrength by viewModel.paletteStrength.collectAsState()
     val autoNext by viewModel.autoNextEnabled.collectAsState()
@@ -307,8 +311,18 @@ fun SettingsScreen(
                         NavRow(
                             icon = Icons.Filled.Cloud,
                             title = if (webdavUrl.isBlank()) "配置 WebDAV 备份" else "修改 WebDAV",
-                            subtitle = "本地 AES-GCM 加密 · 兼容坚果云 / Nextcloud",
+                            subtitle = "云端目录 $cloudDir · 兼容坚果云 / Nextcloud",
                             onClick = { showWebDav = true }
+                        )
+                        Divider()
+                        SwitchRow(
+                            title = "自动同步",
+                            subtitle = buildString {
+                                append("收藏 / 听单 / 进度 / 设置，启动时自动合并")
+                                if (lastSyncAt > 0L) append(" · 上次 ${relativeTime(lastSyncAt)}")
+                            },
+                            checked = autoSyncEnabled,
+                            onCheckedChange = viewModel::setAutoSyncEnabled
                         )
                     }
                 }
@@ -362,14 +376,19 @@ fun SettingsScreen(
         WebDavDialog(
             initialUrl = webdavUrl,
             initialUser = webdavUser,
+            initialCloudDir = cloudDir,
+            initialLegacyPass = legacyBackupPass,
             hasSavedPass = hasSavedPass,
             busy = busy,
             onDismiss = { showWebDav = false },
             onSaveUrl = viewModel::setWebdavUrl,
             onSaveUser = viewModel::setWebdavUser,
             onSavePass = viewModel::setWebdavPass,
+            onSaveCloudDir = viewModel::setCloudDir,
+            onSaveLegacyPass = viewModel::setLegacyBackupPass,
             onBackup = viewModel::webdavBackup,
             onRestore = viewModel::webdavRestore,
+            onSync = viewModel::syncNow,
             onPing = viewModel::webdavPing
         )
     }
@@ -685,22 +704,27 @@ private fun SegmentedRow(
 private fun WebDavDialog(
     initialUrl: String,
     initialUser: String,
+    initialCloudDir: String,
+    initialLegacyPass: String = "",
     hasSavedPass: Boolean = false,
     busy: Boolean,
     onDismiss: () -> Unit,
     onSaveUrl: (String) -> Unit,
     onSaveUser: (String) -> Unit,
     onSavePass: (String) -> Unit,
-    onBackup: (String) -> Unit,
-    onRestore: (String) -> Unit,
+    onSaveCloudDir: (String) -> Unit,
+    onSaveLegacyPass: (String) -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
+    onSync: () -> Unit,
     onPing: () -> Unit
 ) {
     var url by remember { mutableStateOf(initialUrl) }
     var user by remember { mutableStateOf(initialUser) }
+    var cloudDir by remember { mutableStateOf(initialCloudDir) }
+    var legacyPass by remember { mutableStateOf(initialLegacyPass) }
     var davPass by remember { mutableStateOf("") }
-    var encPass by remember { mutableStateOf("") }
     var davPassVisible by remember { mutableStateOf(false) }
-    var encPassVisible by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -752,23 +776,34 @@ private fun WebDavDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = encPass, onValueChange = { encPass = it },
-                    label = { Text("备份加密密码（自己设一个）") },
+                    value = cloudDir,
+                    onValueChange = { cloudDir = it; onSaveCloudDir(it) },
+                    label = { Text("数据备份目录（云端子目录）") },
+                    placeholder = { Text("BiliTing") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (encPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { encPassVisible = !encPassVisible }) {
-                            Icon(
-                                imageVector = if (encPassVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (encPassVisible) "隐藏密码" else "显示密码"
-                            )
-                        }
-                    }
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = legacyPass,
+                    onValueChange = { legacyPass = it; onSaveLegacyPass(it) },
+                    label = { Text("历史备份密码（可选）") },
+                    placeholder = { Text("升级前那份备份用的密码") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row {
+                    TextButton(onClick = { if (!busy) onBackup() }, enabled = !busy) { Text("备份到云端") }
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = { if (!busy) onRestore() }, enabled = !busy) { Text("从云端恢复") }
+                }
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    "WebDAV 密码填坚果云后台→账户→安全→第三方应用管理生成的应用密码（不是登录密码）。备份加密密码自己设一个，用于加密云端数据。",
+                    "WebDAV 密码填坚果云后台→账户→安全→第三方应用管理生成的应用密码（不是登录密码）。" +
+                        "云端文件用这个密码加密，所以只需要记这一个密码。" +
+                        "配置会自动存一份到手机「下载/BiliTing/」下，重装 App 后不用再输。",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Serif
                     ),
@@ -777,25 +812,32 @@ private fun WebDavDialog(
             }
         },
         confirmButton = {
-            // 只要求"备份加密密码"非空即可操作：WebDAV 密码留空会用已保存的那份
+            // 主操作 = 立即同步：把云端和本地合并（不覆盖本地独有内容）
             Button(
-                onClick = { if (!busy) onBackup(encPass) },
-                enabled = !busy && encPass.isNotBlank()
-            ) { Text(if (busy) "处理中..." else "备份") }
+                onClick = { if (!busy) onSync() },
+                enabled = !busy
+            ) { Text(if (busy) "处理中..." else "立即同步") }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = onPing, enabled = !busy) { Text("测试连接") }
                 Spacer(Modifier.width(4.dp))
                 TextButton(onClick = onDismiss) { Text("关闭") }
-                Spacer(Modifier.width(4.dp))
-                Button(
-                    onClick = { if (!busy) onRestore(encPass) },
-                    enabled = !busy && encPass.isNotBlank()
-                ) { Text("恢复") }
             }
         }
     )
+}
+
+/** 「上次同步」的人话时间：1 分钟内算刚刚，超过 7 天就说"很久以前" */
+private fun relativeTime(ts: Long): String {
+    val diff = System.currentTimeMillis() - ts
+    return when {
+        diff < 60_000L -> "刚刚"
+        diff < 3_600_000L -> "${diff / 60_000L} 分钟前"
+        diff < 86_400_000L -> "${diff / 3_600_000L} 小时前"
+        diff < 7 * 86_400_000L -> "${diff / 86_400_000L} 天前"
+        else -> "很久以前"
+    }
 }
 
 /**

@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tingbili.app.BiliTingApplication
+import com.tingbili.app.data.backup.PublicConfigStore
+import com.tingbili.app.data.backup.SyncManager
 import com.tingbili.app.data.backup.WebDavBackup
 import com.tingbili.app.data.local.CookieStore
 import com.tingbili.app.data.local.SettingsStore
@@ -52,6 +54,14 @@ class SettingsViewModel(
     val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val playlistGroupMode: StateFlow<Int> = store.playlistGroupMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    /** 云端备份目录（WebDAV 下的子路径） */
+    val cloudDir: StateFlow<String> = store.cloudDir.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_CLOUD_DIR)
+    /** 历史备份密码：只用于打开"升级前用独立加密密码存的"旧云端备份 */
+    val legacyBackupPass: StateFlow<String> = store.legacyBackupPass.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    /** 启动时自动同步总开关 */
+    val autoSyncEnabled: StateFlow<Boolean> = store.autoSyncEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    /** 上次同步时间（0 = 从未） */
+    val lastSyncAt: StateFlow<Long> = store.lastSyncAt.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val cookieHeader: StateFlow<String> = cookieStore.cookieFlow()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
@@ -73,7 +83,7 @@ class SettingsViewModel(
         // 否则 IO 协程会在属性初始化完成前执行，触发 NPE。
         // 进页面就把各项缓存大小算出来，避免副标题显示空值（以前 playCacheSize 永远为空）
         refreshCacheSizes()
-        viewModelScope.launch(Dispatchers.IO) { store.migrateWebdavPassToEncrypted() }
+        viewModelScope.launch(Dispatchers.IO) { store.migrateSecretsToPlaintext() }
         // DataStore 读写异常以前被静默吞掉，这里统一转成用户可见提示
         viewModelScope.launch {
             store.errors.collect { _msg.value = it }
@@ -102,9 +112,24 @@ class SettingsViewModel(
     fun setSleepMinutes(v: Int) = viewModelScope.launch { store.setSleepMinutes(v) }
     fun setSleepEndOfTrack(v: Boolean) = viewModelScope.launch { store.setSleepEndOfTrack(v) }
 
-    fun setWebdavUrl(v: String) = viewModelScope.launch { store.setWebdavUrl(v) }
-    fun setWebdavUser(v: String) = viewModelScope.launch { store.setWebdavUser(v) }
-    fun setWebdavPass(v: String) = viewModelScope.launch { store.setWebdavPass(v) }
+    /**
+     * 保存 WebDAV 三项配置后，顺手把配置写一份到手机公共目录
+     * （`Download/BiliTing/biliting-sync.json`）——重装后 App 靠它自动把凭证找回来，不用再输密码。
+     */
+    fun setWebdavUrl(v: String) = viewModelScope.launch { store.setWebdavUrl(v); persistExternalConfig() }
+    fun setWebdavUser(v: String) = viewModelScope.launch { store.setWebdavUser(v); persistExternalConfig() }
+    fun setWebdavPass(v: String) = viewModelScope.launch { store.setWebdavPass(v); persistExternalConfig() }
+    fun setCloudDir(v: String) = viewModelScope.launch { store.setCloudDir(v) }
+    fun setLegacyBackupPass(v: String) = viewModelScope.launch { store.setLegacyBackupPass(v) }
+    fun setAutoSyncEnabled(v: Boolean) = viewModelScope.launch { store.setAutoSyncEnabled(v) }
+
+    private suspend fun persistExternalConfig() {
+        val url = store.webdavUrl.first().trim()
+        val user = store.webdavUser.first().trim()
+        val pass = store.webdavPass.first().trim()
+        if (url.isBlank() || user.isBlank() || pass.isBlank()) return
+        PublicConfigStore.save(app, PublicConfigStore.SyncConfig(url, user, pass))
+    }
     fun setImmersiveMode(v: Int) = viewModelScope.launch { store.setImmersiveMode(v) }
     fun setPaletteStrength(v: Int) = viewModelScope.launch { store.setPaletteStrength(v) }
     fun setAutoNextEnabled(v: Boolean) = viewModelScope.launch { store.setAutoNextEnabled(v) }
@@ -136,35 +161,45 @@ class SettingsViewModel(
         }
     }
 
-    /** WebDAV 备份到云端；返回结果会推到 msg 中 */
-    fun webdavBackup(pass: String) {
+    /**
+     * 手动备份到云端。
+     * 加密密钥由 WebDAV 密码派生（SHA-256），所以不再需要单独记一个「备份加密密码」。
+     */
+    fun webdavBackup() {
         val baseUrl = webdavUrl.value.trim()
         val user = webdavUser.value.trim()
+        val pass = webdavPass.value.trim()
         if (baseUrl.isBlank() || user.isBlank() || pass.isBlank()) {
-            _msg.value = "请先填写 WebDAV 地址 / 用户名 / 备份密码"; return
+            _msg.value = "请先填写 WebDAV 地址 / 账号 / 密码"; return
         }
         _busy.value = true
         viewModelScope.launch {
             val records = app.container.libraryRepo.all()
             val snapshot = store.exportSnapshot()
-            val r = WebDavBackup(baseUrl, user, store.webdavPass.first(), pass).backup(records, snapshot)
+            val r = WebDavBackup(baseUrl, user, pass, cloudDir.value, legacyBackupPass.value).backup(records, snapshot)
             _msg.value = r.fold(
-                { "已备份 ${records.size} 条 → 云端 $it" },
+                {
+                    // "已备份 0 条"会被误读成失败：本地为空时换个说法
+                    if (records.isEmpty()) "本地还没有听单内容，已把设置和空备份传到云端：$it"
+                    else "已备份 ${records.size} 条 → 云端 $it"
+                },
                 { "备份失败：${it.message}" }
             )
             _busy.value = false
         }
     }
 
-    fun webdavRestore(pass: String) {
+    /** 手动恢复（优先用手动备份快照；覆盖前先把当前数据另存一份到云端兜底） */
+    fun webdavRestore() {
         val baseUrl = webdavUrl.value.trim()
         val user = webdavUser.value.trim()
+        val pass = webdavPass.value.trim()
         if (baseUrl.isBlank() || user.isBlank() || pass.isBlank()) {
-            _msg.value = "请先填写 WebDAV 地址 / 用户名 / 备份密码"; return
+            _msg.value = "请先填写 WebDAV 地址 / 账号 / 密码"; return
         }
         _busy.value = true
         viewModelScope.launch {
-            val client = WebDavBackup(baseUrl, user, store.webdavPass.first(), pass)
+            val client = WebDavBackup(baseUrl, user, pass, cloudDir.value, legacyBackupPass.value)
             // 覆盖式恢复有风险：先把当前数据另存一份到云端，出错还能捞回来
             runCatching {
                 val cur = app.container.libraryRepo.all()
@@ -182,16 +217,39 @@ class SettingsViewModel(
         }
     }
 
+    /** 立即同步一次：云端与本地按 id 合并（不覆盖本地独有内容） */
+    fun syncNow() {
+        val url = webdavUrl.value.trim()
+        val user = webdavUser.value.trim()
+        val pass = webdavPass.value.trim()
+        if (url.isBlank() || user.isBlank() || pass.isBlank()) {
+            _msg.value = "请先把 WebDAV 地址 / 账号 / 密码填完"; return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            when (val r = SyncManager(app, store, app.container.libraryRepo).sync(manual = true)) {
+                is SyncManager.Result.Ok -> _msg.value = if (r.legacyBlocked)
+                    "已把本地 ${r.total} 条传上云端。云端那份旧备份是用「备份加密密码」加密的，这次没能读进来 —— 想恢复它，请填上「历史备份密码」再同步一次"
+                else
+                    "同步完成：云端 ${r.fetched} 条 → 本地共 ${r.total} 条"
+                is SyncManager.Result.Failed -> _msg.value = "同步失败：${r.message}"
+                SyncManager.Result.Skipped -> _msg.value = "同步已跳过（WebDAV 未配置完整）"
+            }
+            _busy.value = false
+        }
+    }
+
     /** 仅测试连接，不传输数据；用来排查"用户名密码/URL 不对"的问题 */
     fun webdavPing() {
         val baseUrl = webdavUrl.value.trim()
         val user = webdavUser.value.trim()
-        if (baseUrl.isBlank() || user.isBlank()) {
-            _msg.value = "请先填写 WebDAV 地址和用户名"; return
+        val pass = webdavPass.value.trim()
+        if (baseUrl.isBlank() || user.isBlank() || pass.isBlank()) {
+            _msg.value = "请先填写 WebDAV 地址 / 账号 / 密码"; return
         }
         _busy.value = true
         viewModelScope.launch {
-            val (ok, detail) = WebDavBackup(baseUrl, user, store.webdavPass.first(), "").ping()
+            val (ok, detail) = WebDavBackup(baseUrl, user, pass, cloudDir.value, legacyBackupPass.value).ping()
             _msg.value = if (ok) "连接成功 ✓" else "连接失败：$detail"
             _busy.value = false
         }

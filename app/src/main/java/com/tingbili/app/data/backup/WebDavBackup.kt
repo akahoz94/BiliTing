@@ -27,16 +27,30 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * WebDAV 客户端 + 本地加密（AES-GCM）备份/恢复工具。
- *  - 备份：BookRecord 列表 + 设置快照 → AES-GCM 加密 → PUT 到远端「BiliTing/<时间戳>.bin」
+ *  - 备份：BookRecord 列表 + 设置快照 → AES-GCM 加密 → PUT 到远端「<remoteDir>/<时间戳>.bin」
  *  - 恢复：GET 最新的那份密文 → 解密 → 反序列化 → 还原
  *  - 保留最近 KEEP_VERSIONS 份历史备份，避免误备份毁掉好备份
+ *
+ * 密钥策略（重要）：加密密钥由 **WebDAV 密码** 派生（SHA-256），不再单独要一个
+ * 「备份加密密码」—— 用户只需要记一个密码，而云端存的仍然不是明文。
+ * [legacyBackupPass] 只用于兼容历史版本（那时加密密码是独立设置的）：新密钥解不开时再拿它试一次。
  */
 class WebDavBackup(
     private val baseUrl: String,
     private val user: String,
     private val pass: String,
-    private val backupPass: String
+    /** 云端子目录，支持 "a/b" 多级；留空用默认值 */
+    private val remoteDir: String = DEFAULT_DIR,
+    /** 历史版本的「备份加密密码」，仅作解密回退用，可为空 */
+    private val legacyBackupPass: String = ""
 ) {
+    companion object {
+        const val DEFAULT_DIR = "BiliTing"
+
+        /** 启动自动同步写的固定副本：每次覆盖同一份，不挤占手动备份的历史名额 */
+        const val AUTO_FILE = "auto_sync.bin"
+    }
+
     /**
      * 显式超时：OkHttp 默认 10s 读写，弱网下用户会干等且拿不到明确提示。
      * 这里放宽到 connect 15s / read & write 30s / 整体 60s，并在文案里区分超时。
@@ -48,12 +62,14 @@ class WebDavBackup(
         .callTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private val remoteDir = "BiliTing"
+    /** 归一化后的云端目录：去首尾斜杠，空则用默认值 */
+    private val dir: String = remoteDir.trim().trim('/').ifBlank { DEFAULT_DIR }
+
     private val legacyFile = "library_backup.bin"
     private val keepVersions = 5
 
     private val legacyUrl: String get() = baseUrl.trimEnd('/') + "/" + legacyFile
-    private fun fileUrl(name: String): String = baseUrl.trimEnd('/') + "/" + remoteDir + "/" + name
+    private fun fileUrl(name: String): String = baseUrl.trimEnd('/') + "/" + dir + "/" + name
 
     private fun stamp(): String =
         SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -74,7 +90,7 @@ class WebDavBackup(
         403 -> "$method 被拒绝（$code）：账号无写权限或空间已满，请检查坚果云配额"
         404 -> "$method 路径不存在（$code）：WebDAV 地址应填 https://dav.jianguoyun.com/dav/ 并确认云端目录存在"
         405 -> "$method 方法被禁用（$code）：服务端不支持该操作，请更换服务商或地址"
-        409 -> "$method 父目录不存在（$code）：云端目录缺失，请在网页端先建好 BiliTing 目录"
+        409 -> "$method 父目录不存在（$code）：云端目录缺失，请在网页端先建好目录"
         423, 507 -> "$method 失败（$code）：云端存储已满，请清理坚果云空间后重试"
         else -> "$method 失败（HTTP $code${if (serverMsg.isNotBlank()) " $serverMsg" else ""}）"
     }
@@ -96,7 +112,7 @@ class WebDavBackup(
         runCatching {
             ensureRemoteDir()
             val json = Json.encodeToString(BackupPayload(records = records, settings = settings))
-            val (cipherText, iv) = aesEncrypt(json.toByteArray(Charsets.UTF_8), backupPass.toKey())
+            val (cipherText, iv) = aesEncrypt(json.toByteArray(Charsets.UTF_8), deriveKey(pass))
             val body = (iv + cipherText)
             val name = fileName ?: "backup_${stamp()}.bin"
             val req = Request.Builder().url(fileUrl(name))
@@ -106,7 +122,7 @@ class WebDavBackup(
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) error(explain("PUT", resp.code, resp.message))
             }
-            Log.i("WebDavBackup", "backup uploaded: $name (${body.size} bytes)")
+            Log.i("WebDavBackup", "backup uploaded: $dir/$name (${body.size} bytes)")
             pruneOldBackups()
             name
         }.onFailure { Log.e("WebDavBackup", "backup failed", it) }
@@ -118,7 +134,7 @@ class WebDavBackup(
     suspend fun listBackups(): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
             ensureRemoteDir()
-            val dirUrl = baseUrl.trimEnd('/') + "/" + remoteDir + "/"
+            val dirUrl = baseUrl.trimEnd('/') + "/" + dir + "/"
             val body = "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:displayname/></d:prop></d:propfind>"
                 .toRequestBody("application/xml".toMediaTypeOrNull())
             val req = Request.Builder().url(dirUrl)
@@ -139,11 +155,16 @@ class WebDavBackup(
         }.onFailure { Log.e("WebDavBackup", "list failed", it) }
     }
 
-    suspend fun restore(): Result<BackupPayload> = withContext(Dispatchers.IO) {
+    /**
+     * 取云端备份并解密。
+     *  - preferAuto=true（启动自动同步）：优先读自动同步那份固定文件，它代表云端最新状态
+     *  - preferAuto=false（用户手动恢复）：优先读手动备份快照，那是用户明确存下来的版本
+     * 新旧密码都会试：先用 WebDAV 密码派生的密钥，失败再退到 [legacyBackupPass]。
+     */
+    suspend fun restore(preferAuto: Boolean = false): Result<BackupPayload> = withContext(Dispatchers.IO) {
         runCatching {
-            // 优先最新的时间戳备份；没有则退回旧版本遗留的 library_backup.bin
             val names = listBackups().getOrDefault(emptyList())
-            val target = names.firstOrNull { it.startsWith("backup_") } ?: names.firstOrNull()
+            val target = pickTarget(names, preferAuto) ?: names.firstOrNull()
             val url = target?.let { fileUrl(it) } ?: legacyUrl
             val req = Request.Builder().url(url)
                     .header("Authorization", authHeader())
@@ -155,11 +176,31 @@ class WebDavBackup(
                 if (body.size < 28) error("云端备份内容不完整（${body.size} 字节）")
                 val iv = body.copyOfRange(0, 12)
                 val cipherText = body.copyOfRange(12, body.size)
-                val plain = aesDecrypt(cipherText, iv, backupPass.toKey())
+                val plain = decryptWithFallback(cipherText, iv)
                 Json.decodeFromString(BackupPayload.serializer(), String(plain, Charsets.UTF_8))
                     .also { Log.i("WebDavBackup", "restored from $url: ${it.records.size} records") }
             }
         }.onFailure { Log.e("WebDavBackup", "restore failed", it) }
+    }
+
+    /** 选要从云端拉哪一份：自动同步看 auto_sync，手动恢复看时间戳快照 */
+    private fun pickTarget(names: List<String>, preferAuto: Boolean): String? {
+        val manual = names.firstOrNull { it.startsWith("backup_") }
+        val auto = names.firstOrNull { it == AUTO_FILE }
+        return if (preferAuto) auto ?: manual else manual ?: auto
+    }
+
+    private fun decryptWithFallback(cipherText: ByteArray, iv: ByteArray): ByteArray {
+        runCatching { return aesDecrypt(cipherText, iv, deriveKey(pass)) }
+        if (legacyBackupPass.isNotBlank()) {
+            runCatching { return aesDecrypt(cipherText, iv, deriveKey(legacyBackupPass)) }
+        }
+        throw BackupDecryptException(
+            if (legacyBackupPass.isBlank())
+                "这份云端备份是升级前用「备份加密密码」加密的，要打开它得先填入当年的那个密码"
+            else
+                "填入的历史备份密码不对，再确认一下大小写和空格"
+        )
     }
 
     /** 删除超出保留份数的旧备份（失败不影响主流程） */
@@ -188,7 +229,7 @@ class WebDavBackup(
         runCatching {
             val auth = authHeader()
             val debug = "user=[${user.trim()}] passLen=${pass.trim().length}"
-            Log.i("WebDavBackup", "ping: url=$baseUrl $debug")
+            Log.i("WebDavBackup", "ping: url=$baseUrl dir=$dir $debug")
 
             // 1) 写权限预检：确保备份目录可用
             ensureRemoteDir()?.let { (code, msg) ->
@@ -223,21 +264,33 @@ class WebDavBackup(
     }
 
     /**
-     * 确保远端备份目录存在。返回 HTTP 码，null 表示请求本身没成功发出。
+     * 确保远端备份目录存在（支持多级，逐级 MKCOL）。
+     * 返回最后一次的 HTTP 码，null 表示请求本身没成功发出。
      * 201=已创建、405=已存在，都算通过。
      */
     private suspend fun ensureRemoteDir(): Pair<Int, String>? {
-        val dirUrl = baseUrl.trimEnd('/') + "/" + remoteDir
-        return runCatching {
-            val req = Request.Builder().url(dirUrl)
-                    .header("Authorization", authHeader())
-                    .method("MKCOL", null)
-                    .build()
-            client.newCall(req).execute().use { resp ->
-                Log.i("WebDavBackup", "MKCOL $dirUrl -> ${resp.code}")
-                resp.code to resp.message
+        var last: Pair<Int, String>? = null
+        var acc = ""
+        for (seg in dir.split('/').filter { it.isNotBlank() }) {
+            acc = if (acc.isEmpty()) seg else "$acc/$seg"
+            val dirUrl = baseUrl.trimEnd('/') + "/" + acc
+            val r = runCatching {
+                val req = Request.Builder().url(dirUrl)
+                        .header("Authorization", authHeader())
+                        .method("MKCOL", null)
+                        .build()
+                client.newCall(req).execute().use { resp ->
+                    Log.i("WebDavBackup", "MKCOL $dirUrl -> ${resp.code}")
+                    resp.code to resp.message
+                }
+            }.getOrNull()
+            if (r != null) {
+                last = r
+                // 认证/权限类错误没必要再往下试
+                if (r.first == 401 || r.first == 403) return r
             }
-        }.getOrNull()
+        }
+        return last
     }
 
     // ------------------------------------------------------------------ 加密
@@ -255,5 +308,14 @@ class WebDavBackup(
         return cipher.doFinal(cipherText)
     }
 
-    private fun String.toKey(): ByteArray = MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8))
+    private fun deriveKey(password: String): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
 }
+
+/**
+ * 云端那份被**另一个密码**加密 —— 典型场景：升级前用独立的「备份加密密码」存的。
+ *
+ * 单独成类，是为了让上层能把"读不了旧备份"和"网络/认证失败"区分开：
+ * 前者可以降级为"忽略旧备份、重新上传本地"（用户数据不丢），后者必须报错。
+ */
+class BackupDecryptException(message: String) : IllegalStateException(message)

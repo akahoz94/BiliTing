@@ -14,8 +14,8 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 61
-        versionName = "0.23.9"
+        versionCode = 62
+        versionName = "0.23.10"
     }
 
     signingConfigs {

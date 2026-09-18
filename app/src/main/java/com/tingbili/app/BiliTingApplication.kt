@@ -11,6 +11,7 @@ import com.tingbili.app.data.api.WbiKeyStore
 import com.tingbili.app.data.api.WbiSigner
 import com.tingbili.app.data.api.buildHttpClient
 import com.tingbili.app.data.api.buildRetrofit
+import com.tingbili.app.data.backup.SyncManager
 import com.tingbili.app.data.local.AppDatabase
 import com.tingbili.app.data.local.BookRecordDao
 import com.tingbili.app.data.local.CookieStore
@@ -114,9 +115,25 @@ class BiliTingApplication : Application() {
             }.onFailure {
                 Log.w(TAG_BANNER, "恢复最近播放记录失败：${it.message}")
             }
-            // 启动时把老版本明文存储的 WebDAV 密码升级为 KeyStore 加密
-            runCatching { settingsStore.migrateWebdavPassToEncrypted() }
-                .onFailure { Log.w(TAG_BANNER, "WebDAV 密码加密迁移失败", it) }
+            // 把历史 KeyStore 密文密码转回明文（那层加密卸载后会变成死锁，详见 SettingsStore）
+            runCatching { settingsStore.migrateSecretsToPlaintext() }
+                .onFailure { Log.w(TAG_BANNER, "WebDAV 密码迁移失败", it) }
+        }
+
+        // 启动自动同步：先自举外置配置（重装后靠它把 WebDAV 凭证找回来），再与云端合并一次。
+        // 没配 WebDAV 或用户关掉开关时静默跳过，绝不影响启动。
+        applicationScope.launch(Dispatchers.IO) {
+            runCatching {
+                val result = SyncManager(this@BiliTingApplication, settingsStore, container.libraryRepo).sync()
+                when (result) {
+                    is SyncManager.Result.Ok ->
+                        Log.i(TAG_BANNER, "启动同步完成：云端 ${result.fetched} 条 → 本地共 ${result.total} 条")
+                    is SyncManager.Result.Failed ->
+                        Log.w(TAG_BANNER, "启动同步失败：${result.message}")
+                    SyncManager.Result.Skipped ->
+                        Log.i(TAG_BANNER, "启动同步跳过（未配置 WebDAV 或已关闭自动同步）")
+                }
+            }.onFailure { Log.w(TAG_BANNER, "启动同步异常", it) }
         }
     }
 
