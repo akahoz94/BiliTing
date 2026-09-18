@@ -35,6 +35,7 @@ class SettingsViewModel(
     val themeMode: StateFlow<Int> = store.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val themeColor: StateFlow<Int> = store.themeColor.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val audioOnly: StateFlow<Boolean> = store.audioOnly.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val audioGain: StateFlow<Float> = store.audioGain.stateIn(viewModelScope, SharingStarted.Eagerly, 1.0f)
     val keywords: StateFlow<Set<String>> = store.keywords.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val speed: StateFlow<Float> = store.playbackSpeed.stateIn(viewModelScope, SharingStarted.Eagerly, 1.0f)
     val sleepMinutes: StateFlow<Int> = store.sleepMinutes.stateIn(viewModelScope, SharingStarted.Eagerly, 30)
@@ -84,6 +85,12 @@ class SettingsViewModel(
     fun setAudioOnly(v: Boolean) {
         viewModelScope.launch { store.setAudioOnly(v) }
         app.container.playerHolder.setAudioOnly(v)
+    }
+
+    /** 音量增益：立即作用到播放器（听得见的实时变化），同时持久化 */
+    fun setAudioGain(v: Float) {
+        app.container.playerHolder.setGain(v)
+        viewModelScope.launch { store.setAudioGain(v) }
     }
     fun addKeyword(k: String) = viewModelScope.launch {
         val cur = keywords.value.toMutableSet(); cur.add(k); store.setKeywords(cur)

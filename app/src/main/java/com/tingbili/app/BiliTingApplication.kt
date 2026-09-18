@@ -67,21 +67,43 @@ class BiliTingApplication : Application() {
         try {
             playerLauncher = PlayerLauncher(playerHolder, container.playRepo, container.libraryRepo, container.biliService, settingsStore)
             container.playerLauncher = playerLauncher
-            playerHolder.onSeekToNextRequested = {
-                applicationScope.launch(Dispatchers.Main) { playerLauncher.nextPart() }
+            // 播放器自动跨进了占位项：占位项自己的下标就是"该播哪一集"（别再加一，那是跳集）
+            playerHolder.onSeekToPartRequested = { index ->
+                applicationScope.launch(Dispatchers.Main) {
+                    runCatching { playerLauncher.jumpToPart(index) }
+                        .onFailure {
+                            Log.w(TAG_BANNER, "切集失败（$index）：${it.message}")
+                            com.tingbili.app.util.ErrorBus.post(message = "切集失败：${it.message ?: "网络异常"}")
+                        }
+                }
             }
-            playerHolder.onSeekToPreviousRequested = {
-                applicationScope.launch(Dispatchers.Main) { playerLauncher.prevPart() }
+            // 冷启动迷你条处于"待播"态（只有 record，播放器是空的），点播放时补装载
+            playerHolder.onEmptyPlayRequested = {
+                applicationScope.launch(Dispatchers.Main) {
+                    runCatching { playerLauncher.resumeCurrent() }
+                        .onFailure {
+                            Log.w(TAG_BANNER, "续播失败：${it.message}")
+                            com.tingbili.app.util.ErrorBus.post(message = "续播失败：${it.message ?: "网络异常"}")
+                        }
+                }
+            }
+            // 进度落盘下沉到播放层：从迷你条/通知栏听的时候听单进度条才不会是空的
+            playerHolder.onProgressPersist = { r: com.tingbili.app.data.local.BookRecord ->
+                container.libraryRepo.recordPlayed(r)
             }
         } catch (t: Throwable) {
             Log.e(TAG_BANNER, "PlayerLauncher 初始化失败", t)
         }
-        applicationScope.launch(Dispatchers.IO) {
+        // 预建 ExoPlayer：必须在主线程（media3 的 player 绑定主线程，后台线程创建会在
+        // 之后任何一次访问时报 "Player is accessed on the wrong thread"）
+        applicationScope.launch(Dispatchers.Main) {
             runCatching {
                 playerHolder.ensurePlayer()
             }.onFailure {
                 Log.w(TAG_BANNER, "启动预初始化 Player 失败：${it.message}")
             }
+        }
+        applicationScope.launch(Dispatchers.IO) {
             // 启动时恢复最近播放记录，让迷你播放条常驻显示
             runCatching {
                 val recent = appDatabase.bookRecordDao().getMostRecent()

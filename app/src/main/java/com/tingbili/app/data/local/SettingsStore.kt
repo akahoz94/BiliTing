@@ -46,6 +46,8 @@ class SettingsStore(private val context: Context) {
 
     companion object {
         private const val TAG = "SettingsStore"
+        const val MIN_GAIN = 0.5f
+        const val MAX_GAIN = 3.0f
     }
 
     private val dataStore = context.dataStore
@@ -65,6 +67,8 @@ class SettingsStore(private val context: Context) {
     private val keyKeywords = stringSetPreferencesKey("keywords")
     private val keyThemeColor = intPreferencesKey("theme_color")
     private val keyAudioOnly = booleanPreferencesKey("audio_only")
+    /** 音量增益（1.0 = 原始音量，最高 3.0）。ExoPlayer.volume 上限是 1，想更响只能增益 PCM */
+    private val keyAudioGain = floatPreferencesKey("audio_gain")
     private val keyWebdavUrl = stringPreferencesKey("webdav_url")
     private val keyWebdavUser = stringPreferencesKey("webdav_user")
     private val keyWebdavPass = stringPreferencesKey("webdav_pass")
@@ -106,6 +110,8 @@ class SettingsStore(private val context: Context) {
     val keywords: Flow<Set<String>> = dataStore.data.map { it[keyKeywords] ?: Defaults.KEYWORDS }.failSafe("keywords", Defaults.KEYWORDS)
     val themeColor: Flow<Int> = dataStore.data.map { it[keyThemeColor] ?: Defaults.COLOR_PURPLE }.failSafe("theme_color", Defaults.COLOR_PURPLE)
     val audioOnly: Flow<Boolean> = dataStore.data.map { it[keyAudioOnly] ?: true }.failSafe("audio_only", true)
+    val audioGain: Flow<Float> = dataStore.data.map { (it[keyAudioGain] ?: 1.0f).coerceIn(MIN_GAIN, MAX_GAIN) }
+        .failSafe("audio_gain", 1.0f)
     val webdavUrl: Flow<String> = dataStore.data.map { it[keyWebdavUrl] ?: "" }.failSafe("webdav_url", "")
     val webdavUser: Flow<String> = dataStore.data.map { it[keyWebdavUser] ?: "" }.failSafe("webdav_user", "")
     val immersiveMode: Flow<Int> = dataStore.data.map { it[keyImmersiveMode] ?: 0 }.failSafe("immersive_mode", 0)
@@ -136,6 +142,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setKeywords(v: Set<String>) = write("keywords") { it[keyKeywords] = v }
     suspend fun setThemeColor(v: Int) = write("theme_color") { it[keyThemeColor] = v }
     suspend fun setAudioOnly(v: Boolean) = write("audio_only") { it[keyAudioOnly] = v }
+    suspend fun setAudioGain(v: Float) = write("audio_gain") { it[keyAudioGain] = v.coerceIn(MIN_GAIN, MAX_GAIN) }
     suspend fun setImmersiveMode(v: Int) = write("immersive_mode") { it[keyImmersiveMode] = v }
     suspend fun setPaletteStrength(v: Int) = write("palette_strength") { it[keyPaletteStrength] = v }
     suspend fun setAutoNextEnabled(v: Boolean) = write("auto_next_enabled") { it[keyAutoNextEnabled] = v }

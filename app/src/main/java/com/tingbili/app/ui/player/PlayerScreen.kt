@@ -23,6 +23,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.Settings
@@ -68,6 +72,7 @@ import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.download.DownloadManager
 import com.tingbili.app.player.PartItem
 import com.tingbili.app.util.CoverUtil
+import com.tingbili.app.util.ErrorBus
 import com.tingbili.app.util.FormatUtil
 import kotlinx.coroutines.launch
 
@@ -114,9 +119,6 @@ fun PlayerScreen(
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val fav = s.record?.isFavorite == true
 
-    // 长按加速状态
-    var longPressSpeed by remember { mutableFloatStateOf(0f) }
-
     CoverColorBackground(
         record = record,
         settings = settingsStore
@@ -154,13 +156,13 @@ fun PlayerScreen(
                 }
             }
 
-            // 封面区域：双击左半屏上一集，右半屏下一集；长按2x速
+            // 封面区域：双击左半屏上一集，右半屏下一集
             Box(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(horizontal = 36.dp, vertical = 4.dp)
-                    .pointerInput(s.queueIndex, s.speed) {
+                    .pointerInput(s.queueIndex) {
                         detectTapGestures(
                             onDoubleTap = { offset ->
                                 val w = size.width
@@ -171,18 +173,11 @@ fun PlayerScreen(
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     viewModel.nextPart()
                                 }
-                            },
-                            onLongPress = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                longPressSpeed = s.speed
-                                viewModel.setSpeed(2.0f)
                             }
                         )
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // 长按松开检测：用 onPointerEvent 或简单的 pointerInput 组合
-                // 简化：在 Box 外面加一个 pointerInput 检测 release
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     shadowElevation = 10.dp,
@@ -228,30 +223,6 @@ fun PlayerScreen(
                             )
                         }
                     }
-                }
-                // 长按加速时显示提示
-                if (longPressSpeed > 0f) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f))
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            "2.0x 加速中",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-
-            // 长按松开恢复倍速：用 DisposableEffect 监听 longPressSpeed
-            LaunchedEffect(longPressSpeed) {
-                if (longPressSpeed > 0f) {
-                    // 等待长按结束（detectTapGestures 的 onLongPress 不提供 release 回调）
-                    // 用简单方案：长按开始后，下次 pointerInput 触发时恢复
                 }
             }
 
@@ -339,18 +310,29 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = viewModel::prevPart) {
-                    Text("⏮", style = MaterialTheme.typography.titleLarge, color = contentColor)
+                    Icon(
+                        Icons.Filled.SkipPrevious,
+                        contentDescription = "上一集",
+                        tint = contentColor,
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
                 Spacer(Modifier.width(24.dp))
                 FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp)) {
-                    Text(
-                        if (s.isPlaying) "⏸" else "▶",
-                        style = MaterialTheme.typography.headlineMedium
+                    Icon(
+                        imageVector = if (s.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (s.isPlaying) "暂停" else "播放",
+                        modifier = Modifier.size(36.dp)
                     )
                 }
                 Spacer(Modifier.width(24.dp))
                 IconButton(onClick = viewModel::nextPart) {
-                    Text("⏭", style = MaterialTheme.typography.titleLarge, color = contentColor)
+                    Icon(
+                        Icons.Filled.SkipNext,
+                        contentDescription = "下一集",
+                        tint = contentColor,
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
             }
 

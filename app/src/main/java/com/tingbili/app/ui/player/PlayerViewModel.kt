@@ -1,5 +1,7 @@
 package com.tingbili.app.ui.player
 
+import android.util.Log
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -66,6 +68,10 @@ class PlayerViewModel(
                 val ended = !p.isPlaying && p.playbackState == Player.STATE_ENDED
                 if (ended && !autoNextFired) {
                     autoNextFired = true
+                    Log.i(
+                        "PlayerViewModel",
+                        "ended -> autoNext fired, itemCount=${p.mediaItemCount} idx=${p.currentMediaItemIndex}"
+                    )
                     if (sleepTimer.isEndOfTrack()) {
                         sleepTimer.stop()
                     }

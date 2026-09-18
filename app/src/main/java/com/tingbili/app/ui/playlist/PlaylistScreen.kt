@@ -1,6 +1,8 @@
 package com.tingbili.app.ui.playlist
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,18 +22,33 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.BookmarkRemove
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,7 +95,7 @@ fun PlaylistScreen(
 
     Scaffold(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
                 title = {
@@ -107,7 +126,7 @@ fun PlaylistScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 )
             )
         }
@@ -170,62 +189,70 @@ fun PlaylistScreen(
         }
     }
 
-    // 长按管理菜单
+    // 长按管理菜单：底部抽屉，带图标，危险操作独立置底
     pendingAction?.let { record ->
         val idx = favorites.indexOfFirst { it.id == record.id }
-        AlertDialog(
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
             onDismissRequest = { pendingAction = null },
-            title = { Text("管理《${record.title.ifBlank { "未命名" }}》") },
-            text = {
-                Column {
-                    TextButton(onClick = { viewModel.moveUp(idx); pendingAction = null }, modifier = Modifier.fillMaxWidth()) {
-                        Text("上移", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = { viewModel.moveDown(idx); pendingAction = null }, modifier = Modifier.fillMaxWidth()) {
-                        Text("下移", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = { showTagDialog = record; pendingAction = null }, modifier = Modifier.fillMaxWidth()) {
-                        Text("设置标签", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = {
-                        val dm = (ctx.applicationContext as com.tingbili.app.BiliTingApplication).container.downloadManager
-                        scope.launch {
-                            dm.download(
-                                recordId = record.id,
-                                bookTitle = record.title,
-                                cover = record.cover,
-                                bvid = record.bvid,
-                                cid = record.currentCid,
-                                auid = record.auid,
-                                partTitle = "全集"
-                            )
-                        }
-                        pendingAction = null
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        Text("下载缓存", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = { viewModel.setFinished(record.id, true); pendingAction = null }, modifier = Modifier.fillMaxWidth()) {
-                        Text("标为听完归档", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = {
-                        viewModel.unfavorite(record.id)
-                        pendingAction = null
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        Text("从听单移除", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = {
-                        viewModel.delete(record.id)
-                        pendingAction = null
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        Text("彻底删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth())
-                    }
+            sheetState = sheetState
+        ) {
+            Column(
+                Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = AppTokens.Spacing3)
+            ) {
+                Text(
+                    text = record.title.ifBlank { "未命名" },
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2)
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(Modifier.height(AppTokens.Spacing1))
+                SheetItem(Icons.Filled.ArrowUpward, "上移", enabled = idx > 0) {
+                    viewModel.moveUp(idx); pendingAction = null
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { pendingAction = null }) { Text("取消") }
+                SheetItem(Icons.Filled.ArrowDownward, "下移", enabled = idx >= 0 && idx < favorites.size - 1) {
+                    viewModel.moveDown(idx); pendingAction = null
+                }
+                SheetItem(Icons.Filled.Label, "设置标签") {
+                    showTagDialog = record; pendingAction = null
+                }
+                SheetItem(Icons.Filled.Download, "下载缓存") {
+                    val dm = (ctx.applicationContext as com.tingbili.app.BiliTingApplication).container.downloadManager
+                    scope.launch {
+                        dm.download(
+                            recordId = record.id,
+                            bookTitle = record.title,
+                            cover = record.cover,
+                            bvid = record.bvid,
+                            cid = record.currentCid,
+                            auid = record.auid,
+                            partTitle = "全集"
+                        )
+                    }
+                    pendingAction = null
+                }
+                SheetItem(Icons.Filled.Archive, "标为听完归档") {
+                    viewModel.setFinished(record.id, true); pendingAction = null
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(vertical = AppTokens.Spacing1)
+                )
+                SheetItem(Icons.Filled.BookmarkRemove, "从听单移除") {
+                    viewModel.unfavorite(record.id); pendingAction = null
+                }
+                SheetItem(Icons.Filled.DeleteForever, "彻底删除", danger = true) {
+                    viewModel.delete(record.id); pendingAction = null
+                }
             }
-        )
+        }
     }
 
     // 设置标签对话框
@@ -339,6 +366,36 @@ private fun PlaylistCard(record: BookRecord, onClick: () -> Unit, onLongClick: (
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SheetItem(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    val tint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        danger -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = AppTokens.Spacing4, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(AppTokens.Spacing4))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) tint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        )
     }
 }
 

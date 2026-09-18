@@ -67,7 +67,7 @@ fun PlayerSettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
             modifier = Modifier

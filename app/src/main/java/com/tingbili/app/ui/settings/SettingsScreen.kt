@@ -24,12 +24,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.AlertDialog
@@ -79,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tingbili.app.data.local.Defaults
 import com.tingbili.app.ui.theme.ThemePalettes
+import com.tingbili.app.util.BatteryOptimization
 
 /**
  * 设置页 —— 第一版设计语言（与听单/搜索/历史统一）：
@@ -93,6 +97,7 @@ import com.tingbili.app.ui.theme.ThemePalettes
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onBack: () -> Unit = {},
     onOpenStats: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -101,6 +106,7 @@ fun SettingsScreen(
     val theme by viewModel.themeMode.collectAsState()
     val themeColor by viewModel.themeColor.collectAsState()
     val audioOnly by viewModel.audioOnly.collectAsState()
+    val audioGain by viewModel.audioGain.collectAsState()
     val webdavUrl by viewModel.webdavUrl.collectAsState()
     val webdavUser by viewModel.webdavUser.collectAsState()
     val hasSavedPass by viewModel.hasSavedWebdavPass.collectAsState()
@@ -117,15 +123,25 @@ fun SettingsScreen(
 
     var showWebDav by remember { mutableStateOf(false) }
     var showCookie by remember { mutableStateOf(false) }
+    // 后台保活：应用详情页/电池优化白名单的系统状态，进页面读一次，点开时再读一次
+    val appCtx = LocalContext.current
+    var showKeepAlive by remember { mutableStateOf(false) }
+    var showGain by remember { mutableStateOf(false) }
+    var ignoringBatteryOpt by remember { mutableStateOf(BatteryOptimization.isIgnoring(appCtx)) }
     val cookieHeader by viewModel.cookieHeader.collectAsState()
     val hasSessdata = cookieHeader.contains("SESSDATA=", ignoreCase = true) ||
         cookieHeader.contains("sessdata=", ignoreCase = true)
 
     Scaffold(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
                 title = {
                     Text(
                         "设置",
@@ -137,7 +153,7 @@ fun SettingsScreen(
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 )
             )
         }
@@ -214,6 +230,31 @@ fun SettingsScreen(
                             subtitle = "同一 UP 主下次播放自动用上次倍速",
                             checked = rememberSpeed,
                             onCheckedChange = viewModel::setRememberSpeedPerAuthor
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.VolumeUp,
+                            title = "音量增益",
+                            subtitle = if (audioGain > 1.005f) {
+                                "当前 ×${"%.2f".format(audioGain)}：比原始音轨更响（可能有削波失真）"
+                            } else {
+                                "原始音量。B 站音轨偏轻时可放大到 300%"
+                            },
+                            onClick = { showGain = true }
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.Lock,
+                            title = "后台保活",
+                            subtitle = if (ignoringBatteryOpt) {
+                                "已在电池优化白名单，退后台不会被系统掐断"
+                            } else {
+                                "未设置：息屏或退后台一段时间会被系统暂停播放"
+                            },
+                            onClick = {
+                                ignoringBatteryOpt = BatteryOptimization.isIgnoring(appCtx)
+                                showKeepAlive = true
+                            }
                         )
                     }
                 }
@@ -340,6 +381,84 @@ fun SettingsScreen(
             onDismiss = { showCookie = false },
             onSave = viewModel::setCookie,
             onClear = viewModel::clearCookie
+        )
+    }
+
+    if (showGain) {
+        AlertDialog(
+            onDismissRequest = { showGain = false },
+            title = { Text("音量增益") },
+            text = {
+                Column {
+                    Text(
+                        if (audioGain > 1.005f) "×${"%.2f".format(audioGain)}（+${((audioGain - 1f) * 100).toInt()}%）"
+                        else "×1.00（原始音量）"
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Slider(
+                        value = audioGain,
+                        onValueChange = { viewModel.setAudioGain(it) },
+                        valueRange = 1.0f..3.0f
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "拖动即时生效。放大的是音频样本本身，超过原始电平会有削波（破音）风险，" +
+                            "建议只调到刚好听得清。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showGain = false }) { Text("好") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.setAudioGain(1.0f)
+                    showGain = false
+                }) { Text("恢复原始") }
+            }
+        )
+    }
+
+    if (showKeepAlive) {
+        AlertDialog(
+            onDismissRequest = { showKeepAlive = false },
+            title = { Text("后台保活") },
+            text = {
+                Text(
+                    if (ignoringBatteryOpt) {
+                        "已加入电池优化白名单。\n\n" +
+                            "如果退后台几分钟后仍会自动停，多半是厂商的省电策略还在拦——" +
+                            "在系统设置里给 BiliTing 打开「自启动 / 后台运行 / 允许后台活动」，" +
+                            "并把省电策略设为「无限制」。"
+                    } else {
+                        "系统为了省电，会在息屏或退后台一段时间后冻结 App，连前台播放服务也保不住。\n\n" +
+                            "① 点下面按钮把 BiliTing 加入电池优化白名单（系统会弹确认框，选「允许」）\n" +
+                            "② 国产 ROM 还差一步：在应用详情里打开「自启动 / 后台运行」，" +
+                            "省电策略选「无限制」"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showKeepAlive = false
+                    if (!ignoringBatteryOpt) BatteryOptimization.requestIgnore(appCtx)
+                    else BatteryOptimization.openAppDetails(appCtx)
+                }) {
+                    Text(if (ignoringBatteryOpt) "打开应用详情" else "忽略电池优化")
+                }
+            },
+            dismissButton = {
+                if (!ignoringBatteryOpt) {
+                    TextButton(onClick = {
+                        showKeepAlive = false
+                        BatteryOptimization.openAppDetails(appCtx)
+                    }) { Text("去应用详情") }
+                } else {
+                    TextButton(onClick = { showKeepAlive = false }) { Text("知道了") }
+                }
+            }
         )
     }
 

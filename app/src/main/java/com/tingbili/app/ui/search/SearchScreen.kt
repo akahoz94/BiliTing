@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
@@ -89,7 +90,7 @@ fun SearchScreen(
 
     Scaffold(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
                 title = {
@@ -102,7 +103,7 @@ fun SearchScreen(
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 )
             )
         }

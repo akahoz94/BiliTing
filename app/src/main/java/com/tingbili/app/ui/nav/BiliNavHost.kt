@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
@@ -39,7 +40,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.tingbili.app.BiliTingApplication
@@ -47,6 +47,7 @@ import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.player.PlayerLauncher
 import com.tingbili.app.ui.author.AuthorScreen
+import com.tingbili.app.ui.discover.DiscoverScreen
 import com.tingbili.app.ui.downloads.DownloadScreen
 import com.tingbili.app.ui.history.HistoryScreen
 import com.tingbili.app.ui.player.PlayerScreen
@@ -58,11 +59,17 @@ import com.tingbili.app.ui.stats.StatsScreen
 import kotlinx.coroutines.launch
 
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
+    Discover("discover", "发现", Icons.Filled.Explore),
     Playlist("playlist", "听单", Icons.Filled.Headphones),
     Search("search", "搜索", Icons.Filled.Search),
     History("history", "历史", Icons.Filled.History),
     Settings("settings", "设置", Icons.Filled.Settings)
 }
+
+private const val SETTINGS_ROUTE = "settings"
+private val MINI_PLAYER_ROUTES = setOf(
+    Tab.Discover.route, Tab.Playlist.route, Tab.Search.route, Tab.History.route, SETTINGS_ROUTE
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,17 +102,26 @@ fun BiliNavHost() {
         }
     }
 
-    val isTab = Tab.entries.any { it.route == currentRoute }
-    val isFullscreen = currentRoute == "player" || currentRoute?.contains("author") == true
+    val showNavBar = Tab.entries.any { it.route == currentRoute }
+    val showMiniPlayer = currentRoute in MINI_PLAYER_ROUTES
 
-    fun playAndNavigate(item: SearchItem) {
-        scope.launch { launcher.playSearchItem(item) }
-        navController.navigate("player")
+    /**
+     * 列表里点一下 = 直接开始播，**不跳播放页**。
+     * 全屏播放页改成从底部迷你条进入（点一下或上滑展开），对齐 QQ 音乐 / 网易云的手感。
+     */
+    fun playInline(item: SearchItem) {
+        scope.launch {
+            // 解析播放地址是网络请求，异常不能让它把进程带走
+            runCatching { launcher.playSearchItem(item) }
+                .onFailure { ErrorBus.post(message = "播放失败：${it.message ?: "网络异常"}") }
+        }
     }
 
-    fun resumeAndNavigate(record: BookRecord) {
-        scope.launch { launcher.playRecord(record) }
-        navController.navigate("player")
+    fun playRecordInline(record: BookRecord) {
+        scope.launch {
+            runCatching { launcher.playRecord(record) }
+                .onFailure { ErrorBus.post(message = "播放失败：${it.message ?: "网络异常"}") }
+        }
     }
 
     fun favoriteSearchItem(item: SearchItem) {
@@ -127,6 +143,8 @@ fun BiliNavHost() {
             )
             container.libraryRepo.recordPlayed(record)
             container.libraryRepo.toggleFavorite(id, true)
+            // 点了 + 必须给反馈，否则用户不知道有没有收进去
+            ErrorBus.post(message = "已加入听单")
         }
     }
 
@@ -157,28 +175,37 @@ fun BiliNavHost() {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (isTab) {
+            if (showMiniPlayer) {
                 Column {
                     MiniPlayerBar(
                         holder = container.playerHolder,
-                        onOpenPlayer = { navController.navigate("player") }
+                        onOpenPlayer = { navController.navigate("player") },
+                        onEmptyClick = {
+                            navController.navigate(Tab.Playlist.route) {
+                                popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
                     )
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ) {
-                        Tab.entries.forEach { tab ->
-                            NavigationBarItem(
-                                selected = currentRoute == tab.route,
-                                onClick = {
-                                    navController.navigate(tab.route) {
-                                        popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                                label = { Text(tab.label) }
-                            )
+                    if (showNavBar) {
+                        NavigationBar(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ) {
+                            Tab.entries.forEach { tab ->
+                                NavigationBarItem(
+                                    selected = currentRoute == tab.route,
+                                    onClick = {
+                                        navController.navigate(tab.route) {
+                                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    },
+                                    icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                    label = { Text(tab.label) }
+                                )
+                            }
                         }
                     }
                 }
@@ -187,12 +214,20 @@ fun BiliNavHost() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Tab.Playlist.route,
+            startDestination = Tab.Discover.route,
             modifier = Modifier.fillMaxSize()
         ) {
+            composable(Tab.Discover.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
+                DiscoverScreen(
+                    onOpenPlayer = ::playInline,
+                    onOpenAuthor = { mid, name, avatar, bvid -> openAuthor(mid, name, avatar, bvid) },
+                    onFavorite = ::favoriteSearchItem,
+                    modifier = Modifier.padding(padding)
+                )
+            }
             composable(Tab.Playlist.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 PlaylistScreen(
-                    onOpenPlayer = ::resumeAndNavigate,
+                    onOpenPlayer = ::playRecordInline,
                     onOpenSearch = {
                         navController.navigate(Tab.Search.route) {
                             popUpTo(navController.graph.startDestinationId) { saveState = true }
@@ -205,7 +240,7 @@ fun BiliNavHost() {
             }
             composable(Tab.Search.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 SearchScreen(
-                    onOpenPlayer = ::playAndNavigate,
+                    onOpenPlayer = ::playInline,
                     onOpenAuthor = { mid, name, avatar, bvid -> openAuthor(mid, name, avatar, bvid) },
                     onFavorite = ::favoriteSearchItem,
                     modifier = Modifier.padding(padding)
@@ -213,12 +248,13 @@ fun BiliNavHost() {
             }
             composable(Tab.History.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 HistoryScreen(
-                    onOpenPlayer = ::resumeAndNavigate,
+                    onOpenPlayer = ::playRecordInline,
                     modifier = Modifier.padding(padding)
                 )
             }
-            composable(Tab.Settings.route, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
+            composable(SETTINGS_ROUTE, enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
                 SettingsScreen(
+                    onBack = { navController.popBackStack() },
                     onOpenStats = { navController.navigate("stats") },
                     onOpenDownloads = { navController.navigate("downloads") },
                     modifier = Modifier.padding(padding)
@@ -240,7 +276,7 @@ fun BiliNavHost() {
                     name = name,
                     avatar = avatar,
                     onBack = { navController.popBackStack() },
-                    onOpenPlayer = ::playAndNavigate,
+                    onOpenPlayer = ::playInline,
                     modifier = Modifier.fillMaxSize()
                 )
             }

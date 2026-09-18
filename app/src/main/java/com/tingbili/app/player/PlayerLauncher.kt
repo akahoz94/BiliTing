@@ -59,6 +59,11 @@ class PlayerLauncher(
 
     suspend fun playRecord(record: BookRecord) {
         val existing = library.get(record.id) ?: record
+        // 正在播的就是这一条：别重新装载——会断一下，进度还会被库里的旧值拉回去
+        if (holder.hasMedia() && holder.record.value?.id == existing.id) {
+            if (!holder.isPlaying()) holder.togglePlay()
+            return
+        }
         val positionMs = existing.progressMs.coerceAtLeast(0L)
         val initialSpeed = when {
             existing.speed > 0.05f && existing.speed < 4f -> existing.speed
@@ -70,7 +75,7 @@ class PlayerLauncher(
             val url = playRepo.resolveAudioUrl(null, null, auid) ?: return
             val r = existing.copy(progressMs = 0L, speed = initialSpeed)
             holder.play(r, url, emptyList(), positionMs, initialSpeed)
-            library.recordPlayed(r)
+            markPlayed(r, existing)
         } else {
             val bvid = existing.bvid!!
             // currentCid 可能为 null（新收藏没播过），先 resolveVideo 拿第一集
@@ -97,7 +102,7 @@ class PlayerLauncher(
             )
             val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
             holder.play(r, url, initialQueue, positionMs, initialSpeed, startIndex = if (queueFromVideo != null) queueFromVideo.indexOfFirst { it.cid == cid }.coerceAtLeast(0) else 0)
-            library.recordPlayed(r)
+            markPlayed(r, existing)
             // 如果初始队列就是单集（currentCid 有值，没 resolveVideo），后台补全分P
             if (queueFromVideo == null) {
                 CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -108,6 +113,15 @@ class PlayerLauncher(
                 }
             }
         }
+    }
+
+    /** 落盘播放记录，但不要把已存的进度/时长抹成 0 */
+    private suspend fun markPlayed(r: BookRecord, keep: BookRecord) =
+        library.recordPlayed(r.copy(progressMs = keep.progressMs, durationMs = keep.durationMs))
+
+    /** 冷启动后播放器是空的：拿当前 record 真正装载音频并续播上次进度 */
+    suspend fun resumeCurrent() {
+        playRecord(holder.record.value ?: return)
     }
 
     private suspend fun resolvePerAuthorSpeed(mid: Long): Float? {
@@ -161,6 +175,7 @@ class PlayerLauncher(
         val queue = holder.currentQueue()
         if (queue.isEmpty()) return
         val next = holder.currentQueueIndex() + 1
+        Log.i("PlayerLauncher", "nextPart cur=${holder.currentQueueIndex()} next=$next size=${queue.size}")
         if (next >= queue.size) return
         playQueueItem(queue, next)
     }
@@ -180,10 +195,13 @@ class PlayerLauncher(
 
     private suspend fun playQueueItem(queue: List<PartItem>, index: Int) {
         val item = queue[index]
+        Log.i("PlayerLauncher", "playQueueItem index=$index part=${item.part} cid=${item.cid}")
         val url = playRepo.resolveAudioUrl(item.bvid, item.cid, null) ?: return
         val cur = holder.record.value ?: return
-        val r = cur.copy(currentCid = item.cid, currentPart = index + 1, progressMs = 0L)
-        holder.play(r, url, queue, 0L, 1.0f, startIndex = index)
+        // 切集要沿用当前倍速：写死 1.0f 会让"1.5 倍速听了一集，下一集变回原速"
+        val speed = cur.speed.takeIf { it > 0.05f && it < 4f } ?: 1.0f
+        val r = cur.copy(currentCid = item.cid, currentPart = index + 1, progressMs = 0L, speed = speed)
+        holder.play(r, url, queue, 0L, speed, startIndex = index)
         library.recordPlayed(r)
     }
 }

@@ -1,5 +1,6 @@
 package com.tingbili.app.player
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
 import androidx.media3.session.MediaSession
@@ -27,10 +28,20 @@ class PlaybackService : MediaSessionService() {
         runCatching {
             val app = applicationContext as com.tingbili.app.BiliTingApplication
             val player = app.playerHolder.player
+            // 点通知栏回到 App（不设 sessionActivity 的话点通知是没反应的）
+            val sessionActivity = PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, com.tingbili.app.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
             // MediaSession 绑定到 PlayerHolder 的同一个 ExoPlayer；
             // 系统锁屏/通知栏看到的 controls 都通过这个 session 桥接到 player，
             // 自动生成 ⏯ / ⏭ / ⏮，并把"下一首"映射成 seekToNext。
-            mediaSession = MediaSession.Builder(this, player).build()
+            mediaSession = MediaSession.Builder(this, player)
+                .setSessionActivity(sessionActivity)
+                .build()
             Log.i(TAG, "PlaybackService onCreate, MediaSession ready")
         }.onFailure {
             Log.e(TAG, "PlaybackService.onCreate 失败", it)
@@ -39,27 +50,22 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // 用户从最近任务里滑掉 App 时，若非播放中则停服，避免残留通知
-        runCatching {
-            val player = mediaSession?.player
-            if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
-                stopSelf()
-            }
-        }
-        super.onTaskRemoved(rootIntent)
-    }
+    /**
+     * 不覆写 onTaskRemoved：media3 自带实现已经是"正在播就继续跑，没在播才 pause 并停服"，
+     * 自己再写一遍只会引入差异（曾经写成"只要不是 playWhenReady 就 stopSelf"，
+     * 与官方 isPlaybackOngoing() 判定不一致，划掉任务时容易把正在播的会话掐掉）。
+     */
 
     override fun onDestroy() {
+        // 只释放 MediaSession，**绝不能**在服务里 release 共享的 ExoPlayer：
+        // PlayerHolder 持有的是 Application 级单例，服务一旦被系统回收就把全局播放器
+        // 一起 release 掉，之后点播放全都没反应（"退后台一会儿就停了"的元凶之一）。
         runCatching {
-            mediaSession?.run {
-                player.release()
-                release()
-            }
-            mediaSession = null
+            mediaSession?.release()
         }.onFailure {
-            Log.w(TAG, "onDestroy 清理 MediaSession 异常", it)
+            Log.w(TAG, "释放 MediaSession 异常", it)
         }
+        mediaSession = null
         super.onDestroy()
     }
 

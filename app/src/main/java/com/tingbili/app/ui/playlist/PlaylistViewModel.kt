@@ -81,22 +81,6 @@ class PlaylistViewModel(
         }
     }
 
-    val continueTarget: StateFlow<BookRecord?> = kotlinx.coroutines.flow.flow {
-        val app = BiliTingApplication.get()
-        app?.playerHolder?.record?.collect { emit(it) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    val isPlaying: StateFlow<Boolean> = kotlinx.coroutines.flow.flow {
-        while (true) {
-            val holder = BiliTingApplication.get()?.playerHolder
-            emit(holder?.isPlaying() ?: false)
-            kotlinx.coroutines.delay(500)
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    private val _miniExpanded = MutableStateFlow(true)
-    val miniExpanded: StateFlow<Boolean> = _miniExpanded.asStateFlow()
-
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
