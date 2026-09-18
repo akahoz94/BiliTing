@@ -19,26 +19,25 @@ class PlayRepository(
 
     suspend fun resolveAudioUrl(bvid: String?, cid: Long?, auid: Long?): String? {
         if (bvid != null && bvid.isNotBlank() && cid != null && cid > 0L) {
-            sniffer?.let { s ->
-                runCatching { s.sniff(bvid, cid) }
-                    .onSuccess { url ->
-                        if (!url.isNullOrBlank()) {
-                            Log.i(TAG, "WebView 嗅探成功: $bvid")
-                            return url
-                        }
-                    }
-                    .onFailure { Log.w(TAG, "WebView 嗅探异常: ${it.message}") }
-            }
-
             val dash = playUrlApi.audioUrl(bvid, cid)
             if (!dash.isNullOrBlank()) {
-                Log.i(TAG, "playUrl API 成功(兜底): $bvid")
+                Log.i(TAG, "playUrl API 成功: $bvid")
                 return dash
             }
             val legacy = playUrlApi.legacyDurl(bvid, cid)
             if (!legacy.isNullOrBlank()) {
-                Log.i(TAG, "legacy durl 成功(兜底): $bvid")
+                Log.i(TAG, "legacy durl 成功: $bvid")
                 return legacy
+            }
+            sniffer?.let { s ->
+                runCatching { s.sniff(bvid, cid) }
+                    .onSuccess { url ->
+                        if (!url.isNullOrBlank()) {
+                            Log.i(TAG, "WebView 嗅探成功(兜底): $bvid")
+                            return url
+                        }
+                    }
+                    .onFailure { Log.w(TAG, "WebView 嗅探异常: ${it.message}") }
             }
         }
         if (auid != null && auid > 0L) {
