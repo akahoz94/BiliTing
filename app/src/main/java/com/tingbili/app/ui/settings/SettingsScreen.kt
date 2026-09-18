@@ -1,4 +1,4 @@
-package com.tingbili.app.ui.settings
+﻿package com.tingbili.app.ui.settings
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -330,7 +330,7 @@ fun SettingsScreen(
 
     if (showCookie) {
         CookieDialog(
-            initial = cookieHeader,
+            initial = if (cookieHeader.isBlank()) viewModel.anonymousCookie else cookieHeader,
             busy = busy,
             onDismiss = { showCookie = false },
             onSave = viewModel::setCookie,

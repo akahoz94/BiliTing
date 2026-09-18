@@ -40,6 +40,8 @@ class SettingsViewModel(
     val cookieHeader: StateFlow<String> = cookieStore.cookieFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
+    /** 当前使用的匿名 cookie（未登录时自动生成） */
+    val anonymousCookie: String get() = app.container.baseCookie
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
     private val _msg = MutableStateFlow<String?>(null)
