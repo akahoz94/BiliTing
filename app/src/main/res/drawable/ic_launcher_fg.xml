@@ -4,42 +4,36 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- 耳机头带（白色，居中在安全区内） -->
     <path
-        android:pathData="M 36,58 C 36,38 72,38 72,58"
+        android:pathData="M 34,58 C 34,34 74,34 74,58"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="7"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
-
-    <!-- 左耳罩 -->
     <path
-        android:pathData="M 42,68 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0"
+        android:pathData="M 30,56 h 12 a 6,6 0 0 1 6,6 v 14 a 6,6 0 0 1 -6,6 h -12 a 6,6 0 0 1 -6,-6 v -14 a 6,6 0 0 1 6,-6 z"
         android:fillColor="#FFFFFF" />
-
-    <!-- 右耳罩 -->
     <path
-        android:pathData="M 66,68 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0"
+        android:pathData="M 66,56 h 12 a 6,6 0 0 1 6,6 v 14 a 6,6 0 0 1 -6,6 h -12 a 6,6 0 0 1 -6,-6 v -14 a 6,6 0 0 1 6,-6 z"
         android:fillColor="#FFFFFF" />
-
-    <!-- 声波：中间三条线 -->
     <path
-        android:pathData="M 54,50 L 54,58"
+        android:pathData="M 46,52 L 46,58"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
+        android:strokeWidth="3.5"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M 48,46 C 48,46 46,50 46,54"
+        android:pathData="M 51,46 L 51,58"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
     <path
-        android:pathData="M 60,46 C 60,46 62,50 62,54"
+        android:pathData="M 56,44 L 56,58"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
-
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 61,48 L 61,58"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
 </vector>
