@@ -158,6 +158,66 @@ class PlayerHolder(
     var onSeekToPartRequested: ((Int) -> Unit)? = null
     var onProgressPersist: (suspend (BookRecord) -> Unit)? = null
 
+    // ---------------- 睡眠定时（App 级） ----------------
+    // 放在这里而不是播放页的 ViewModel 里：页面一退出 ViewModel 就 onCleared，
+    // 定时器跟着没了 —— "听完本集停止/倒计时"会随着切 tab 静默失效。
+    private val _sleepRemainSec = MutableStateFlow(-1)
+    val sleepRemainSec: StateFlow<Int> = _sleepRemainSec
+    private val _sleepEndOfTrack = MutableStateFlow(false)
+    val sleepEndOfTrack: StateFlow<Boolean> = _sleepEndOfTrack
+    private var sleepTotalMs: Long = 0L
+    private var sleepStartElapsed: Long = 0L
+
+    private val sleepTimer = SleepTimer(
+        onFire = {
+            pause()
+            setVolume(1f)
+            sleepTotalMs = 0L
+            _sleepRemainSec.value = -1
+            _sleepEndOfTrack.value = false
+        },
+        setVolume = { v -> setVolume(v) },
+        setPauseAtEnd = { armed -> setPauseAtEndOfMediaItems(armed) },
+        fadeOutMs = 30_000L
+    )
+
+    fun startSleep(minutes: Int) {
+        sleepTotalMs = minutes * 60_000L
+        sleepStartElapsed = System.currentTimeMillis()
+        _sleepRemainSec.value = minutes * 60
+        _sleepEndOfTrack.value = false
+        sleepTimer.start(minutes)
+    }
+
+    fun startSleepEndOfTrack() {
+        sleepTimer.startEndOfTrack()
+        sleepTotalMs = 0L
+        _sleepRemainSec.value = -1
+        _sleepEndOfTrack.value = true
+    }
+
+    fun stopSleep() {
+        sleepTimer.stop()
+        setVolume(1f)
+        sleepTotalMs = 0L
+        _sleepRemainSec.value = -1
+        _sleepEndOfTrack.value = false
+    }
+
+    /**
+     * 听完本集停止的开关：交给 ExoPlayer 的"本集末尾暂停"（内部 = setPauseAtEndOfWindow）。
+     * 打开后本集播完就地停住，不会切进下一集的占位项，也就不会顺着占位继续播下一集。
+     * 同样只能在主线程调用（getter/setter 都有线程校验）。
+     */
+    fun setPauseAtEndOfMediaItems(armed: Boolean) {
+        pauseAtEndArmed = armed
+        onMain { runCatching { player.setPauseAtEndOfMediaItems(armed) } }
+    }
+
+    @Volatile private var pauseAtEndArmed = false
+    @Volatile private var lastIsPlaying = false
+    @Volatile private var lastMediaItemCount = 0
+
     fun setAudioOnly(audioOnly: Boolean) {
         val sel = _trackSelector ?: return
         sel.parameters = sel.buildUponParameters()
@@ -169,17 +229,28 @@ class PlayerHolder(
         p.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 queueIndex = p.currentMediaItemIndex.coerceAtLeast(0)
+                lastMediaItemCount = p.mediaItemCount
                 val mid = mediaItem?.mediaId.orEmpty()
                 Log.i("PlayerHolder", "transition idx=$queueIndex reason=$reason mid=$mid")
                 // 占位项 mediaId 形如 "<id>#part3"：下标就是该播的集数。
                 // 之前在这里调 nextPart()（内部拿 currentQueueIndex()+1），而此刻
                 // queueIndex 已经是占位项下标了 —— 等于连跳两集，第 2 集被整段吞掉。
-                val target = mid.substringAfterLast("#part", "").toIntOrNull()
-                if (target != null) onSeekToPartRequested?.invoke(target)
+                val target = mid.substringAfterLast("#part", "").toIntOrNull() ?: return
+                // 听完本集停止：本集已经结束，别再去解析下一集（兜底；正常情况下
+                // pauseAtEnd 已经让播放器就地停住，根本不会切到占位项）
+                if (pauseAtEndArmed) {
+                    sleepTimer.onPlaybackStopped()
+                    return
+                }
+                onSeekToPartRequested?.invoke(target)
             }
 
             override fun onIsPlayingChanged(playing: Boolean) {
-                if (!playing) trackingScope.launch { persistProgress(p) }
+                lastIsPlaying = playing
+                if (playing) return
+                trackingScope.launch { persistProgress(p) }
+                // 听完本集停止：只有"真的播到本集末尾"才算，用户手动暂停不算
+                if (pauseAtEndArmed && isAtEndOfCurrentItem(p)) sleepTimer.onPlaybackStopped()
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -187,6 +258,15 @@ class PlayerHolder(
             }
         })
     }
+
+    /**
+     * 只在播放器回调（主线程）里调用：确认是"播到本集末尾"而不是中途暂停。
+     * 位置/时长都是媒体时间轴上的值，不受倍速影响。
+     */
+    private fun isAtEndOfCurrentItem(p: ExoPlayer): Boolean = runCatching {
+        val d = p.duration
+        d > 0L && p.currentPosition >= d - 1_000L
+    }.getOrDefault(false)
 
     /**
      * 进度落盘不能只靠播放器页的 ViewModel：从迷你条 / 通知栏 / 锁屏听的时候
@@ -216,6 +296,12 @@ class PlayerHolder(
             var sinceSave = 0L
             while (true) {
                 kotlinx.coroutines.delay(1000)
+                // 睡眠定时状态每秒刷一次（StateFlow 写入，UI 直接 collect）
+                _sleepRemainSec.value = if (sleepTotalMs > 0L) {
+                    ((sleepTotalMs - (System.currentTimeMillis() - sleepStartElapsed)) / 1000L)
+                        .toInt().coerceAtLeast(0)
+                } else -1
+                _sleepEndOfTrack.value = sleepTimer.isEndOfTrack()
                 if (!shouldTrack) continue
                 val playing = kotlinx.coroutines.withContext(Dispatchers.Main) {
                     runCatching { p.isPlaying }.getOrDefault(false)
@@ -308,6 +394,7 @@ class PlayerHolder(
             player.playbackParameters = PlaybackParameters(speed)
             player.prepare()
             player.play()
+            lastMediaItemCount = player.mediaItemCount
         }
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -341,6 +428,7 @@ class PlayerHolder(
             player.setMediaItems(buildItems(r, currentAudioUrl, newQueue, idx), idx, pos)
             player.prepare()
             if (wasPlaying) player.play()
+            lastMediaItemCount = player.mediaItemCount
         }
     }
 
@@ -350,8 +438,12 @@ class PlayerHolder(
 
     fun updateRecord(record: BookRecord) { _record.value = record }
 
-    /** 播放器里是否已装载音频（冷启动恢复态下为 false） */
-    fun hasMedia(): Boolean = runCatching { player.mediaItemCount > 0 }.getOrDefault(false)
+    /**
+     * 播放器里是否已装载音频（冷启动恢复态下为 false）。
+     * 读缓存而不是直读播放器：这个 getter 也有线程校验，后台线程读会被
+     * runCatching 吞成 false，表现为"明明装着音频却当成没装载"。
+     */
+    fun hasMedia(): Boolean = lastMediaItemCount > 0
 
     /**
      * 空播放列表时 player.play() 是空操作，迷你条会变成"死条"。
@@ -390,7 +482,8 @@ class PlayerHolder(
     }
 
     fun pause() = onMain { player.pause() }
-    fun isPlaying(): Boolean = runCatching { player.isPlaying }.getOrDefault(false)
+    /** 播放态读缓存（由播放器回调在主线程维护）：任何线程都能安全读，不会触发线程校验 */
+    fun isPlaying(): Boolean = lastIsPlaying
     fun togglePlayPause() {
         onMain { if (player.isPlaying) player.pause() else player.play() }
     }

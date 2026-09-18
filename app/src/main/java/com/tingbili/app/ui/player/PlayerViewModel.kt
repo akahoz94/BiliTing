@@ -15,7 +15,6 @@ import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.player.PartItem
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
-import com.tingbili.app.player.SleepTimer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,22 +42,12 @@ class PlayerViewModel(
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
 
-    private var sleepRemain = -1
-    private var sleepTotalMs = 0L
-    private var sleepStartElapsed = 0L
     private var autoNextFired = false
 
-    private val sleepTimer = SleepTimer(
-        onFire = {
-            holder.pause()
-            holder.setVolume(1f)
-            sleepRemain = -1
-            _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = false)
-        },
-        isPlayingProvider = { holder.player.isPlaying },
-        setVolume = { v -> holder.setVolume(v) },
-        fadeOutMs = 30_000L
-    )
+    // 睡眠定时器本体在 PlayerHolder（App 级）：这里只做转发 + UI 状态镜像。
+    // 早前放在本 ViewModel 里有两个致命问题：
+    //  1) 它在后台线程轮询 player.isPlaying —— ExoPlayer 的 getter 有线程校验，必崩；
+    //  2) 播放页一退出 onCleared 就把定时器停掉，"听完本集/倒计时"当场失效。
 
     fun bind() {
         viewModelScope.launch {
@@ -72,10 +61,12 @@ class PlayerViewModel(
                         "PlayerViewModel",
                         "ended -> autoNext fired, itemCount=${p.mediaItemCount} idx=${p.currentMediaItemIndex}"
                     )
-                    if (sleepTimer.isEndOfTrack()) {
-                        sleepTimer.stop()
+                    if (holder.sleepEndOfTrack.value) {
+                        // 听完本集停止：就到这儿，别自动续播下一集
+                        holder.stopSleep()
+                    } else {
+                        launcher.nextPart()
                     }
-                    launcher.nextPart()
                 } else if (!ended) {
                     autoNextFired = false
                 }
@@ -85,11 +76,8 @@ class PlayerViewModel(
                     positionMs = p.currentPosition,
                     durationMs = p.duration.coerceAtLeast(0L),
                     speed = p.playbackParameters.speed,
-                    sleepRemainSec = if (sleepTotalMs > 0L) {
-                        val remain = sleepTotalMs - (System.currentTimeMillis() - sleepStartElapsed)
-                        (remain / 1000L).toInt().coerceAtLeast(0)
-                    } else -1,
-                    sleepEndOfTrack = sleepTimer.isEndOfTrack(),
+                    sleepRemainSec = holder.sleepRemainSec.value,
+                    sleepEndOfTrack = holder.sleepEndOfTrack.value,
                     queue = holder.currentQueue(),
                     queueIndex = holder.currentQueueIndex()
                 )
@@ -121,25 +109,18 @@ class PlayerViewModel(
     fun jumpToPart(index: Int) = viewModelScope.launch { launcher.jumpToPart(index) }
 
     fun startSleep(minutes: Int) {
-        sleepTotalMs = minutes * 60_000L
-        sleepRemain = minutes * 60
-        sleepStartElapsed = System.currentTimeMillis()
-        sleepTimer.start(minutes)
+        holder.startSleep(minutes)
+        _state.value = _state.value.copy(sleepRemainSec = minutes * 60, sleepEndOfTrack = false)
     }
 
     fun startSleepEndOfTrack() {
-        sleepTimer.startEndOfTrack()
-        sleepRemain = -1
-        sleepTotalMs = 0L
-        _state.value = _state.value.copy(sleepEndOfTrack = true)
+        holder.startSleepEndOfTrack()
+        _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = true)
     }
 
     fun stopSleep() {
-        sleepTimer.stop()
-        holder.setVolume(1f)
-        sleepRemain = -1
-        sleepTotalMs = 0L
-        _state.value = _state.value.copy(sleepEndOfTrack = false)
+        holder.stopSleep()
+        _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = false)
     }
 
     fun saveProgress() {
@@ -164,7 +145,8 @@ class PlayerViewModel(
     }
 
     override fun onCleared() {
-        sleepTimer.stop()
+        // 注意：**不要**在这里停睡眠定时器 —— 它在 PlayerHolder（App 级）上，
+        // 退出播放页、切 tab 都得继续生效（否则用户锁屏听书时定时会静默失效）。
         super.onCleared()
     }
 

@@ -48,6 +48,16 @@ class DiscoverViewModel(
      */
     val categories: List<DiscoverCategory> = listOf(
         DiscoverCategory("有声书", listOf("有声书 全集")),
+        // 广播剧：上次用「广播剧 全集」搜出来一堆真人影视剪辑，这次换成贴近音频广播剧的词
+        DiscoverCategory(
+            "广播剧",
+            listOf(
+                "广播剧 全一季",
+                "广播剧 第一季",
+                "广播剧 CV",
+                "有声剧 全集"
+            )
+        ),
         DiscoverCategory(
             "播客",
             listOf(
@@ -102,20 +112,6 @@ class DiscoverViewModel(
         val feed = _feeds.value[category.label] ?: return
         if (feed.loading) return
         load(category, if (feed.items.isEmpty()) 1 else feed.page + 1)
-    }
-
-    /**
-     * 「换一批」：清掉当前分类的内容，从**上一批的下一页**继续拉。
-     *
-     * 注意不能实现成"重新拉第 1 页" —— 同一个检索词的第 1 页永远返回同样那批内容，
-     * 点下去等于什么都没变。用户点这个按钮的意图就是"给我没见过的"。
-     */
-    fun shuffle(category: DiscoverCategory) {
-        val feed = _feeds.value[category.label] ?: return
-        if (feed.loading) return
-        val nextPage = (feed.page + 1).coerceAtLeast(2)
-        update(category.label) { it.copy(items = emptyList(), endReached = false, loading = false) }
-        load(category, nextPage, replace = true)
     }
 
     private fun update(label: String, transform: (CategoryFeed) -> CategoryFeed) {
