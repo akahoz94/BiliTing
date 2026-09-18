@@ -251,6 +251,12 @@ class PlayerHolder(
         queueIndex = index.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
     }
 
+    /** 只更新队列数据，不重置播放器（后台补全分P列表时用） */
+    fun updateQueue(newQueue: List<PartItem>, newIndex: Int) {
+        queue = newQueue
+        queueIndex = newIndex.coerceIn(0, (newQueue.size - 1).coerceAtLeast(0))
+    }
+
     fun seekToQueue(index: Int, positionMs: Long) {
         runCatching { player.seekTo(index, positionMs) }
     }

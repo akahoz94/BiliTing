@@ -236,6 +236,20 @@ fun SettingsScreen(
                         )
                         Divider()
                         NavRow(
+                            icon = Icons.Filled.Brush,
+                            title = "清除封面缓存",
+                            subtitle = "当前占用 $coverCacheSize",
+                            onClick = { viewModel.clearCoverCache() }
+                        )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.FolderDelete,
+                            title = "清除下载音频",
+                            subtitle = "当前占用 $downloadCacheSize",
+                            onClick = { viewModel.clearDownloadCache() }
+                        )
+                        Divider()
+                        NavRow(
                             icon = Icons.Filled.Key,
                             title = if (hasSessdata) "修改 B 站登录 cookie" else "粘贴 B 站登录 cookie",
                             subtitle = if (hasSessdata)

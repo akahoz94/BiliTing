@@ -73,15 +73,21 @@ class PlayerLauncher(
             library.recordPlayed(r)
         } else {
             val bvid = existing.bvid!!
-            val cid = existing.currentCid ?: return
-            // 1. 先拿音频URL立刻播（关键路径，只发一个请求）
+            // currentCid 可能为 null（新收藏没播过），先 resolveVideo 拿第一集
+            var cid = existing.currentCid
+            var queueFromVideo: List<PartItem>? = null
+            if (cid == null || cid <= 0L) {
+                val resolved = playRepo.resolveVideo(bvid)
+                queueFromVideo = resolved?.second
+                cid = queueFromVideo?.firstOrNull()?.cid
+                if (cid == null || cid <= 0L) return
+            }
             val url = playRepo.resolveAudioUrl(bvid, cid, null)
             if (url == null) {
                 com.tingbili.app.util.ErrorBus.post(message = "解析播放地址失败，请检查网络后重试")
                 return
             }
-            // 2. 先用单集队列立刻开播
-            val singleQueue = listOf(PartItem(bvid, cid, "", 0L))
+            val initialQueue = queueFromVideo ?: listOf(PartItem(bvid, cid, "", 0L))
             val base = existing.copy(
                 progressMs = 0L,
                 currentCid = cid,
@@ -90,16 +96,14 @@ class PlayerLauncher(
                 speed = initialSpeed
             )
             val r = if (base.ownerMid <= 0L) enrichAuthor(base) else base
-            holder.play(r, url, singleQueue, positionMs, initialSpeed, startIndex = 0)
+            holder.play(r, url, initialQueue, positionMs, initialSpeed, startIndex = if (queueFromVideo != null) queueFromVideo.indexOfFirst { it.cid == cid }.coerceAtLeast(0) else 0)
             library.recordPlayed(r)
-            // 3. 后台补全分P列表，补完后更新队列
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                val fullQueue = playRepo.resolveVideo(bvid)?.second
-                if (fullQueue != null && fullQueue.size > 1) {
-                    val idx = fullQueue.indexOfFirst { it.cid == cid }.coerceAtLeast(0)
-                    // 重新设置完整队列，保留当前播放位置
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        holder.play(r, url, fullQueue, positionMs, initialSpeed, startIndex = idx)
+            // 如果初始队列就是单集（currentCid 有值，没 resolveVideo），后台补全分P
+            if (queueFromVideo == null) {
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    val fullQueue = playRepo.resolveVideo(bvid)?.second
+                    if (fullQueue != null && fullQueue.size > 1) {
+                        holder.updateQueue(fullQueue, fullQueue.indexOfFirst { it.cid == cid }.coerceAtLeast(0))
                     }
                 }
             }
