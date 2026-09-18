@@ -28,13 +28,16 @@ class PlaylistViewModel(
     val tags: StateFlow<List<String>> = dao.observeDistinctTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** ⚠️ 这两个会被 moveUp/moveDown/clearArchived 用 `.value` 直接读，
+     *  必须用 Eagerly：若没有任何订阅者，WhileSubscribed 会让它们永远是空列表，
+     *  表现为"点清空归档毫无反应"（和 Settings 里 webdavPass 的 401 是同一个坑）。 */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val favorites: StateFlow<List<BookRecord>> = _selectedTag.flatMapLatest { tag ->
         if (tag.isBlank()) dao.observeFavorites() else dao.observeFavoritesByTag(tag)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val archivedFavorites: StateFlow<List<BookRecord>> = dao.observeArchivedFavorites()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun selectTag(tag: String) { _selectedTag.value = tag }
 

@@ -37,11 +37,15 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.FolderDelete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -100,6 +104,7 @@ fun SettingsScreen(
     val audioOnly by viewModel.audioOnly.collectAsState()
     val webdavUrl by viewModel.webdavUrl.collectAsState()
     val webdavUser by viewModel.webdavUser.collectAsState()
+    val hasSavedPass by viewModel.hasSavedWebdavPass.collectAsState()
     val immersiveMode by viewModel.immersiveMode.collectAsState()
     val paletteStrength by viewModel.paletteStrength.collectAsState()
     val autoNext by viewModel.autoNextEnabled.collectAsState()
@@ -251,6 +256,13 @@ fun SettingsScreen(
                         )
                         Divider()
                         NavRow(
+                            icon = Icons.Filled.PlayCircle,
+                            title = "清除播放缓存",
+                            subtitle = "当前占用 $playCacheSize（在线收听缓存）",
+                            onClick = { viewModel.clearPlayCache() }
+                        )
+                        Divider()
+                        NavRow(
                             icon = Icons.Filled.Key,
                             title = if (hasSessdata) "修改 B 站登录 cookie" else "粘贴 B 站登录 cookie",
                             subtitle = if (hasSessdata)
@@ -318,6 +330,7 @@ fun SettingsScreen(
         WebDavDialog(
             initialUrl = webdavUrl,
             initialUser = webdavUser,
+            hasSavedPass = hasSavedPass,
             busy = busy,
             onDismiss = { showWebDav = false },
             onSaveUrl = viewModel::setWebdavUrl,
@@ -562,6 +575,7 @@ private fun SegmentedRow(
 private fun WebDavDialog(
     initialUrl: String,
     initialUser: String,
+    hasSavedPass: Boolean = false,
     busy: Boolean,
     onDismiss: () -> Unit,
     onSaveUrl: (String) -> Unit,
@@ -575,6 +589,8 @@ private fun WebDavDialog(
     var user by remember { mutableStateOf(initialUser) }
     var davPass by remember { mutableStateOf("") }
     var encPass by remember { mutableStateOf("") }
+    var davPassVisible by remember { mutableStateOf(false) }
+    var encPassVisible by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -605,19 +621,40 @@ private fun WebDavDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = davPass, onValueChange = { davPass = it; onSavePass(it) },
-                    label = { Text("WebDAV 密码（坚果云应用密码）") },
+                    value = davPass,
+                    onValueChange = {
+                        davPass = it
+                        // 留空表示"沿用已保存的密码"——不要把空串写回去把旧密码清掉
+                        if (it.isNotBlank()) onSavePass(it)
+                    },
+                    label = { Text(if (hasSavedPass) "WebDAV 密码（已保存，留空则沿用）" else "WebDAV 密码（坚果云应用密码）") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Password)
+                    visualTransformation = if (davPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { davPassVisible = !davPassVisible }) {
+                            Icon(
+                                imageVector = if (davPassVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (davPassVisible) "隐藏密码" else "显示密码"
+                            )
+                        }
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = encPass, onValueChange = { encPass = it },
                     label = { Text("备份加密密码（自己设一个）") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Password)
+                    visualTransformation = if (encPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { encPassVisible = !encPassVisible }) {
+                            Icon(
+                                imageVector = if (encPassVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (encPassVisible) "隐藏密码" else "显示密码"
+                            )
+                        }
+                    }
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -630,9 +667,10 @@ private fun WebDavDialog(
             }
         },
         confirmButton = {
+            // 只要求"备份加密密码"非空即可操作：WebDAV 密码留空会用已保存的那份
             Button(
                 onClick = { if (!busy) onBackup(encPass) },
-                enabled = !busy && encPass.isNotBlank() && davPass.isNotBlank()
+                enabled = !busy && encPass.isNotBlank()
             ) { Text(if (busy) "处理中..." else "备份") }
         },
         dismissButton = {
@@ -643,7 +681,7 @@ private fun WebDavDialog(
                 Spacer(Modifier.width(4.dp))
                 Button(
                     onClick = { if (!busy) onRestore(encPass) },
-                    enabled = !busy && encPass.isNotBlank() && davPass.isNotBlank()
+                    enabled = !busy && encPass.isNotBlank()
                 ) { Text("恢复") }
             }
         }

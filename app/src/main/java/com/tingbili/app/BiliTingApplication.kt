@@ -82,6 +82,9 @@ class BiliTingApplication : Application() {
             }.onFailure {
                 Log.w(TAG_BANNER, "启动预初始化 Player 失败：${it.message}")
             }
+            // 启动时把老版本明文存储的 WebDAV 密码升级为 KeyStore 加密
+            runCatching { settingsStore.migrateWebdavPassToEncrypted() }
+                .onFailure { Log.w(TAG_BANNER, "WebDAV 密码加密迁移失败", it) }
         }
     }
 
