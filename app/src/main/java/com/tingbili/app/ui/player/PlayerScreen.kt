@@ -98,6 +98,9 @@ fun PlayerScreen(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val settingsStore = (context.applicationContext as com.tingbili.app.BiliTingApplication).settingsStore
+    // 播放设置抽屉里能调的那个"默认倒计时时长"。以前它只能改、没人读，
+    // 定时弹窗写死 30/60/90/120 —— 典型"设了不生效"的死开关，现在接到弹窗第一项。
+    val defaultSleepMin by settingsStore.sleepMinutes.collectAsState(initial = 30)
     val downloadManager = (context.applicationContext as BiliTingApplication).container.downloadManager
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -470,6 +473,29 @@ fun PlayerScreen(
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
+                    TextButton(
+                        onClick = {
+                            viewModel.startSleep(defaultSleepMin)
+                            ErrorBus.post("已开启：${defaultSleepMin} 分钟后自动停止")
+                            showSleep = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "按设置：$defaultSleepMin 分钟",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text(
+                        "默认时长在播放设置抽屉里调",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(4.dp))
                     listOf(30, 60, 90, 120).forEach { min ->
                         TextButton(
                             onClick = {

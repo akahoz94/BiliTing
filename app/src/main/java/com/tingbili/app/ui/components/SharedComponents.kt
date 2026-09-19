@@ -210,53 +210,6 @@ fun NavRow(
     }
 }
 
-/**
- * 两行描述 + 进度条的进度行：用于听单/历史卡片底部的"已播放 1/3"。
- */
-@Composable
-fun ProgressRow(
-    playedMs: Long,
-    totalMs: Long,
-    modifier: Modifier = Modifier
-) {
-    val pct = if (totalMs > 0L) (playedMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f) else 0f
-    val playedFmt = formatHm(playedMs / 1000)
-    val totalFmt = formatHm(totalMs / 1000)
-
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = playedFmt,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(AppTokens.Spacing2))
-        androidx.compose.material3.LinearProgressIndicator(
-            progress = { pct },
-            modifier = Modifier
-                .weight(1f)
-                .height(AppTokens.ProgressTrackHero)
-                .clip(RoundedCornerShape(50)),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-        Spacer(Modifier.width(AppTokens.Spacing2))
-        Text(
-            text = totalFmt,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-private fun formatHm(seconds: Long): String {
-    val s = seconds.coerceAtLeast(0)
-    return if (s >= 3600) String.format("%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-    else String.format("%d:%02d", s / 60, s % 60)
-}
-
 /** 通用的空状态占位（听单为空、历史为空等） */
 @Composable
 fun EmptyState(
@@ -287,25 +240,4 @@ fun EmptyState(
             )
         }
     }
-}
-
-/** 主色色块（用于 ThemeColor 选色方块） */
-@Composable
-fun ColorSwatch(
-    color: Color,
-    selected: Boolean,
-    onClick: () -> Unit,
-    size: Dp = 44.dp,
-    modifier: Modifier = Modifier
-) {
-    val border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.onSurface)
-                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    Surface(
-        shape = androidx.compose.foundation.shape.CircleShape,
-        color = color,
-        border = border,
-        modifier = modifier
-            .size(size)
-            .clickable(onClick = onClick)
-    ) {}
 }

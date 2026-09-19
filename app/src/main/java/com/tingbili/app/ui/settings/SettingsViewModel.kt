@@ -53,7 +53,6 @@ class SettingsViewModel(
     val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.Eagerly, 60)
     val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val playlistGroupMode: StateFlow<Int> = store.playlistGroupMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     /** 云端备份目录（WebDAV 下的子路径） */
     val cloudDir: StateFlow<String> = store.cloudDir.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_CLOUD_DIR)
     /** 历史备份密码：只用于打开"升级前用独立加密密码存的"旧云端备份 */
@@ -101,9 +100,6 @@ class SettingsViewModel(
     fun setAudioGain(v: Float) {
         app.container.playerHolder.setGain(v)
         viewModelScope.launch { store.setAudioGain(v) }
-    }
-    fun addKeyword(k: String) = viewModelScope.launch {
-        val cur = keywords.value.toMutableSet(); cur.add(k); store.setKeywords(cur)
     }
     fun removeKeyword(k: String) = viewModelScope.launch {
         val cur = keywords.value.toMutableSet(); cur.remove(k); store.setKeywords(cur)

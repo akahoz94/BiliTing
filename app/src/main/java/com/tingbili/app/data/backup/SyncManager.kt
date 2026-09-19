@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.data.local.SettingsStore
+import com.tingbili.app.data.local.encodeTags
+import com.tingbili.app.data.local.tagSet
 import com.tingbili.app.data.repo.LibraryRepository
 import kotlinx.coroutines.flow.first
 
@@ -141,9 +143,11 @@ class SyncManager(
         return newer.copy(
             isFavorite = fav.isFavorite,
             favoriteAt = fav.favoriteAt,
-            // 排序与标签属于"本地怎么摆"，不参与云端覆盖
+            // 排序属于"本地怎么摆"，不参与云端覆盖
             sortOrder = l.sortOrder,
-            tag = if (l.tag.isNotBlank()) l.tag else r.tag
+            // 标签取并集：字段里存的是分号分隔的多标签，两边各自挂上的标签都要留住，
+            // 否则会出现"在 A 设备打的标签被 B 设备的旧数据覆盖掉"
+            tag = encodeTags(l.tagSet() + r.tagSet())
         )
     }
 }

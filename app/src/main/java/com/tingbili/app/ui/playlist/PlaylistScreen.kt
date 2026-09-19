@@ -1,12 +1,14 @@
 package com.tingbili.app.ui.playlist
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,38 +24,35 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BookmarkRemove
 import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,11 +69,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tingbili.app.data.local.BookRecord
+import com.tingbili.app.data.local.tagSet
 import com.tingbili.app.ui.components.CoverImage
 import com.tingbili.app.ui.components.EmptyState
 import com.tingbili.app.ui.theme.AppTokens
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    ExperimentalLayoutApi::class
+)
 @Composable
 fun PlaylistScreen(
     onOpenPlayer: (BookRecord) -> Unit = {},
@@ -83,10 +87,23 @@ fun PlaylistScreen(
     viewModel: PlaylistViewModel = viewModel(factory = PlaylistViewModel.Factory)
 ) {
     val favorites by viewModel.favorites.collectAsState()
+    val allFavorites by viewModel.allFavorites.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val selectedTag by viewModel.selectedTag.collectAsState()
-    var pendingAction by remember { mutableStateOf<BookRecord?>(null) }
-    var showTagDialog by remember { mutableStateOf<BookRecord?>(null) }
+
+    /**
+     * 长按管理面板的状态。**只存 id** 而不是 BookRecord 快照：标签是边点边写库的，
+     * 存快照的话点完 chip 面板里的"已选"不刷新。
+     *
+     * [sheetOnTags] 表示同一个抽屉切到了"标签编辑"这一页 —— 关键设计：菜单和标签编辑
+     * **共用同一个 ModalBottomSheet**，绝不"关掉一个抽屉再弹一个对话框"。
+     * 两个浮层同时存在时，正在退场的那个仍持有全屏 window，会把返回键和触摸一起吃掉，
+     * 表现出来就是"点了标签之后退不出去、页面卡在空白处"。
+     */
+    var sheetTargetId by remember { mutableStateOf<String?>(null) }
+    var sheetOnTags by remember { mutableStateOf(false) }
+
+    val sheetRecord = sheetTargetId?.let { id -> allFavorites.firstOrNull { it.id == id } }
 
     Scaffold(
         modifier = modifier,
@@ -134,7 +151,7 @@ fun PlaylistScreen(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = selectedTag.isBlank(),
@@ -159,22 +176,38 @@ fun PlaylistScreen(
                         Modifier.fillMaxSize().padding(AppTokens.Spacing5),
                         contentAlignment = Alignment.Center
                     ) {
-                        EmptyState(
-                            title = if (selectedTag.isNotBlank()) "「$selectedTag」下还没有" else "听单还是空的",
-                            subtitle = "搜索结果里长按或点击收藏按钮，听过的书都会自动加进来"
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            EmptyState(
+                                title = if (selectedTag.isNotBlank()) "「$selectedTag」下还没有" else "听单还是空的",
+                                subtitle = if (selectedTag.isNotBlank())
+                                    "这个筛选下暂时没有内容，点下面的按钮回到全部听单"
+                                else
+                                    "搜索结果里长按或点击收藏按钮，听过的书都会自动加进来"
+                            )
+                            // 一定要留一条"逃出去"的路：筛选后为空时若只有一句空提示，
+                            // 用户会以为页面卡死在空白页（顶部 chip 行在小屏 + 多标签时还可能被挤没）
+                            if (selectedTag.isNotBlank()) {
+                                Spacer(Modifier.height(AppTokens.Spacing2))
+                                TextButton(onClick = { viewModel.selectTag("") }) {
+                                    Text("显示全部听单")
+                                }
+                            }
+                        }
                     }
                 } else {
                     LazyColumn(
                         Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2)
                     ) {
-                        itemsIndexed(favorites, key = { _, r -> r.id }) { index, record ->
+                        itemsIndexed(favorites, key = { _, r -> r.id }) { _, record ->
                             Spacer(Modifier.height(AppTokens.Spacing3))
                             PlaylistCard(
                                 record = record,
                                 onClick = { onOpenPlayer(record) },
-                                onLongClick = { pendingAction = record }
+                                onLongClick = {
+                                    sheetTargetId = record.id
+                                    sheetOnTags = false
+                                }
                             )
                         }
                         item { Spacer(Modifier.height(140.dp)) }
@@ -184,90 +217,213 @@ fun PlaylistScreen(
         }
     }
 
-    // 长按管理菜单：底部抽屉，带图标，危险操作独立置底
-    pendingAction?.let { record ->
-        val idx = favorites.indexOfFirst { it.id == record.id }
+    if (sheetRecord != null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val closeSheet = { sheetTargetId = null; sheetOnTags = false }
+
         ModalBottomSheet(
-            onDismissRequest = { pendingAction = null },
-            sheetState = sheetState
+            onDismissRequest = closeSheet,
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ) {
-            Column(
-                Modifier
-                    .navigationBarsPadding()
-                    .padding(bottom = AppTokens.Spacing3)
-            ) {
-                Text(
-                    text = record.title.ifBlank { "未命名" },
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2)
+            if (sheetOnTags) {
+                TagEditor(
+                    record = sheetRecord,
+                    knownTags = tags,
+                    onToggle = { viewModel.toggleTag(sheetRecord.id, it) },
+                    onClear = { viewModel.setTags(sheetRecord.id, emptyList()) },
+                    onBack = { sheetOnTags = false },
+                    onDone = closeSheet
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                Spacer(Modifier.height(AppTokens.Spacing1))
-                SheetItem(Icons.Filled.ArrowUpward, "上移", enabled = idx > 0) {
-                    viewModel.moveUp(idx); pendingAction = null
-                }
-                SheetItem(Icons.Filled.ArrowDownward, "下移", enabled = idx >= 0 && idx < favorites.size - 1) {
-                    viewModel.moveDown(idx); pendingAction = null
-                }
-                SheetItem(Icons.Filled.Label, "设置标签") {
-                    showTagDialog = record; pendingAction = null
-                }
-                SheetItem(Icons.Filled.Archive, "标为听完归档") {
-                    viewModel.setFinished(record.id, true); pendingAction = null
-                }
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(vertical = AppTokens.Spacing1)
+            } else {
+                PlaylistMenu(
+                    record = sheetRecord,
+                    index = favorites.indexOfFirst { it.id == sheetRecord.id },
+                    total = favorites.size,
+                    onMoveUp = { viewModel.moveUp(sheetRecord.id); closeSheet() },
+                    onMoveDown = { viewModel.moveDown(sheetRecord.id); closeSheet() },
+                    onEditTags = { sheetOnTags = true },
+                    onArchive = { viewModel.setFinished(sheetRecord.id, true); closeSheet() },
+                    onUnfavorite = { viewModel.unfavorite(sheetRecord.id); closeSheet() },
+                    onDelete = { viewModel.delete(sheetRecord.id); closeSheet() }
                 )
-                SheetItem(Icons.Filled.BookmarkRemove, "从听单移除") {
-                    viewModel.unfavorite(record.id); pendingAction = null
-                }
-                SheetItem(Icons.Filled.DeleteForever, "彻底删除", danger = true) {
-                    viewModel.delete(record.id); pendingAction = null
-                }
             }
         }
     }
+}
 
-    // 设置标签对话框
-    showTagDialog?.let { record ->
-        var tagText by remember(record.id) { mutableStateOf(record.tag) }
-        AlertDialog(
-            onDismissRequest = { showTagDialog = null },
-            title = { Text("设置标签") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = tagText,
-                        onValueChange = { tagText = it },
-                        label = { Text("标签名（如：通勤/睡前/学习）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-                        listOf("通勤", "睡前", "学习", "工作").forEach { preset ->
-                            TextButton(onClick = { tagText = preset }) { Text(preset) }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.setTag(record.id, tagText.trim())
-                    showTagDialog = null
-                }) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTagDialog = null }) { Text("取消") }
-            }
+/** 长按后的操作菜单（抽屉第一页） */
+@Composable
+private fun PlaylistMenu(
+    record: BookRecord,
+    index: Int,
+    total: Int,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onEditTags: () -> Unit,
+    onArchive: () -> Unit,
+    onUnfavorite: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(
+        Modifier
+            .navigationBarsPadding()
+            .padding(bottom = AppTokens.Spacing3)
+    ) {
+        Text(
+            text = record.title.ifBlank { "未命名" },
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.SemiBold
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = AppTokens.Spacing4, vertical = AppTokens.Spacing2)
         )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        Spacer(Modifier.height(AppTokens.Spacing1))
+        SheetItem(Icons.Filled.ArrowUpward, "上移", enabled = index > 0, onClick = onMoveUp)
+        SheetItem(
+            Icons.Filled.ArrowDownward,
+            "下移",
+            enabled = index in 0 until total - 1,
+            onClick = onMoveDown
+        )
+        SheetItem(Icons.Filled.Label, "设置标签", onClick = onEditTags)
+        SheetItem(Icons.Filled.Archive, "标为听完归档", onClick = onArchive)
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(vertical = AppTokens.Spacing1)
+        )
+        SheetItem(Icons.Filled.BookmarkRemove, "从听单移除", onClick = onUnfavorite)
+        SheetItem(Icons.Filled.DeleteForever, "彻底删除", danger = true, onClick = onDelete)
+    }
+}
+
+/**
+ * 标签编辑（抽屉第二页，多选、边点边存）。
+ *
+ * 之所以塞进抽屉而不是开 AlertDialog：软键盘一弹，AlertDialog 会被整体顶上去，
+ * 底部按钮正好被键盘盖住，用户看到的就是"没有返回按键、点都点不动"。
+ * 抽屉自带 IME 避让，这一页顶部有"返回菜单"、底部有"完成"，键盘弹着也一定够得着。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagEditor(
+    record: BookRecord,
+    knownTags: List<String>,
+    onToggle: (String) -> Unit,
+    onClear: () -> Unit,
+    onBack: () -> Unit,
+    onDone: () -> Unit
+) {
+    val current = record.tagSet()
+    var custom by remember(record.id) { mutableStateOf("") }
+    // 预设 + 听单里已经出现过的标签，去重后一起摆出来
+    val palette = (listOf("通勤", "睡前", "学习", "工作") + knownTags).distinct()
+
+    Column(
+        Modifier
+            .navigationBarsPadding()
+            .padding(bottom = AppTokens.Spacing3)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = AppTokens.Spacing2),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回菜单")
+            }
+            Text(
+                text = "设置标签",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        }
+        Text(
+            text = record.title.ifBlank { "未命名" },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = AppTokens.Spacing4)
+        )
+        Spacer(Modifier.height(AppTokens.Spacing2))
+        Text(
+            text = if (current.isEmpty()) "可以多选，一本书能挂多个标签" else "已选：${current.joinToString("、")}",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (current.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = AppTokens.Spacing4)
+        )
+        Spacer(Modifier.height(AppTokens.Spacing3))
+
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppTokens.Spacing4),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            palette.forEach { tag ->
+                FilterChip(
+                    selected = tag in current,
+                    onClick = { onToggle(tag) },
+                    label = { Text(tag) },
+                    colors = FilterChipDefaults.filterChipColors()
+                )
+            }
+        }
+        Spacer(Modifier.height(AppTokens.Spacing4))
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppTokens.Spacing4),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = custom,
+                onValueChange = { custom = it },
+                label = { Text("新标签名") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(AppTokens.Spacing2))
+            IconButton(
+                onClick = {
+                    val t = custom.trim()
+                    if (t.isNotBlank()) {
+                        onToggle(t)
+                        custom = ""
+                    }
+                },
+                enabled = custom.isNotBlank()
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "添加标签")
+            }
+        }
+
+        Spacer(Modifier.height(AppTokens.Spacing4))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        Spacer(Modifier.height(AppTokens.Spacing3))
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppTokens.Spacing4),
+            horizontalArrangement = Arrangement.spacedBy(AppTokens.Spacing3)
+        ) {
+            if (current.isNotEmpty()) {
+                TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
+                    Text("清空标签", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Button(onClick = onDone, modifier = Modifier.weight(1f)) {
+                Text("完成")
+            }
+        }
     }
 }
 
@@ -277,6 +433,7 @@ private fun PlaylistCard(record: BookRecord, onClick: () -> Unit, onLongClick: (
         (record.progressMs.toFloat() / record.durationMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
     val hasProgress = record.durationMs > 0L && record.progressMs > 0L
+    val recordTags = record.tagSet()
 
     Row(
         Modifier
@@ -302,19 +459,27 @@ private fun PlaylistCard(record: BookRecord, onClick: () -> Unit, onLongClick: (
             )
             Spacer(Modifier.height(AppTokens.Spacing1))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (record.tag.isNotBlank()) {
+                recordTags.take(3).forEach { tag ->
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                         modifier = Modifier.padding(end = 6.dp)
                     ) {
                         Text(
-                            text = record.tag,
+                            text = tag,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+                }
+                if (recordTags.size > 3) {
+                    Text(
+                        text = "+${recordTags.size - 3}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
                 }
                 Text(
                     text = buildSubtitle(record),

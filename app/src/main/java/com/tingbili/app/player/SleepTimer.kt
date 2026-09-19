@@ -100,10 +100,5 @@ class SleepTimer(
         onMain { setPauseAtEnd(false) }
     }
 
-    fun isRunning(): Boolean = job?.isActive == true
     fun isEndOfTrack(): Boolean = endOfTrackMode
-    fun isFading(): Boolean {
-        val j = job ?: return false
-        return endOfTrackMode.not() && j.isActive && totalMs > fadeOutMs
-    }
 }

@@ -78,6 +78,12 @@ class SettingsStore(private val context: Context) {
     private val keyWebdavPass = stringPreferencesKey("webdav_pass")
     private val keyWebdavPassEnc = stringPreferencesKey("webdav_pass_enc")
     private val keyImmersiveMode = intPreferencesKey("immersive_mode")
+    /**
+     * ⚠️ 历史遗留：当年打算做「听单分组模式」，UI 从没接上过，现在也没有任何消费者。
+     * 保留 key 和快照字段**只是为了让旧备份还能反序列化**（WebDavBackup 用的默认 Json，
+     * `ignoreUnknownKeys = false`，快照里少一个字段就会让整份旧备份恢复失败）。
+     * 不要为它新增读取方，也不要删。
+     */
     private val keyPlaylistGroupMode = intPreferencesKey("playlist_group_mode")
     private val keyPaletteStrength = intPreferencesKey("palette_strength")
     private val keyAutoNextEnabled = booleanPreferencesKey("auto_next_enabled")
@@ -86,8 +92,12 @@ class SettingsStore(private val context: Context) {
     private val keySearchHistory = stringPreferencesKey("search_history")
     /** UP 主粒度倍速映射（"mid:speed;mid:speed"），仅 rememberSpeedPerAuthor=true 时使用 */
     private val keyAuthorSpeedMap = stringPreferencesKey("author_speed_map")
-    /** 听单分组映射（"id:folder;id:folder"），folder 为空字符串表示"未分组"。
-     *  DataStore key 名沿用 shelf_folders 以兼容旧版本用户已分组的听单数据。 */
+    /**
+     * ⚠️ 历史遗留：听单分组的 id→folder 映射（"id:folder;id:folder"）。
+     * 和 [keyPlaylistGroupMode] 一样，功能从没接上过、现在零消费者，
+     * 保留只为旧备份能反序列化。不要新增读取方，也不要删。
+     * （听单的"归类"需求现在由多标签承担：见 [BookRecord.tag]。）
+     */
     private val keyShelfFolders = stringPreferencesKey("shelf_folders")
     /** 每日收听时长：encode "epochDay:ms;epochDay:ms"（D4 日历统计数据源） */
     private val keyListeningMs = stringPreferencesKey("listening_ms")
@@ -142,7 +152,6 @@ class SettingsStore(private val context: Context) {
      */
     val autoNextEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextEnabled] ?: true }.failSafe("auto_next_enabled", true)
     val rememberSpeedPerAuthor: Flow<Boolean> = dataStore.data.map { it[keyRememberSpeedPerAuthor] ?: false }.failSafe("remember_speed_per_author", false)
-    val playlistGroupMode: Flow<Int> = dataStore.data.map { it[keyPlaylistGroupMode] ?: 0 }.failSafe("playlist_group_mode", 0)
     val autoSyncEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoSyncEnabled] ?: true }.failSafe("auto_sync_enabled", true)
     val lastSyncAt: Flow<Long> = dataStore.data.map { it[keyLastSyncAt] ?: 0L }.failSafe("last_sync_at", 0L)
 
@@ -204,7 +213,6 @@ class SettingsStore(private val context: Context) {
         if (v) p[keySleepEndOfTrack] = false
     }
     suspend fun setRememberSpeedPerAuthor(v: Boolean) = write("remember_speed_per_author") { it[keyRememberSpeedPerAuthor] = v }
-    suspend fun setPlaylistGroupMode(v: Int) = write("playlist_group_mode") { it[keyPlaylistGroupMode] = v }
     suspend fun setAutoSyncEnabled(v: Boolean) = write("auto_sync_enabled") { it[keyAutoSyncEnabled] = v }
     suspend fun setLastSyncAt(v: Long) = write("last_sync_at") { it[keyLastSyncAt] = v }
     suspend fun setCloudDir(v: String) = write("webdav_cloud_dir") { it[keyCloudDir] = v.trim() }
@@ -304,31 +312,6 @@ class SettingsStore(private val context: Context) {
                 .toMutableList()
             pairs.add("$mid:${speed}")
             prefs[keyAuthorSpeedMap] = pairs.joinToString(";")
-        }
-    }
-
-    /** 听单分组：id -> folder 映射 */
-    fun shelfFoldersFlow(): Flow<Map<String, String>> = dataStore.data.map { prefs ->
-        val raw = prefs[keyShelfFolders] ?: return@map emptyMap()
-        raw.split(";").filter { it.isNotBlank() }
-            .mapNotNull {
-                val idx = it.indexOf(':')
-                if (idx <= 0 || idx >= it.length - 1) null
-                else it.substring(0, idx) to it.substring(idx + 1)
-            }.toMap()
-    }.failSafe("shelf_folders", emptyMap())
-
-    suspend fun setShelfFolder(id: String, folder: String) {
-        if (id.isBlank()) return
-        write("shelf_folders") { prefs ->
-            val raw = prefs[keyShelfFolders] ?: ""
-            val pairs = raw.split(";").filter { it.isNotBlank() }
-                .filterNot { it.startsWith("$id:") }
-                .toMutableList()
-            if (folder.isNotBlank()) {
-                pairs.add("$id:$folder")
-            }
-            prefs[keyShelfFolders] = pairs.joinToString(";")
         }
     }
 

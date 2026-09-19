@@ -71,8 +71,6 @@ class DownloadManager(
     fun keyOf(recordId: String, bvid: String?, cid: Long?, auid: Long?): String =
         if (!auid.isNullOrZero()) "audio:$auid" else "video:$recordId:$cid"
 
-    fun itemFor(key: String): Item? = _index.value.firstOrNull { it.key == key }
-
     fun isDownloaded(key: String): Boolean = _index.value.any { it.key == key }
 
     fun localFile(item: Item): File = File(dir, item.fileName)
@@ -227,10 +225,6 @@ class DownloadManager(
         _index.value = emptyList()
         persist()
         return total
-    }
-
-    fun clearTask(key: String) {
-        _tasks.value = _tasks.value - key
     }
 
     fun totalSizeBytes(): Long = _index.value.sumOf { it.sizeBytes }

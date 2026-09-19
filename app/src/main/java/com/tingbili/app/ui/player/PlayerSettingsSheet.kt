@@ -61,7 +61,9 @@ fun PlayerSettingsSheet(
     val speedDefault by settings.playbackSpeed.collectAsState(initial = 1.0f)
     val sleepMin by settings.sleepMinutes.collectAsState(initial = 30)
     val sleepEnd by settings.sleepEndOfTrack.collectAsState(initial = false)
-    val autoNext by settings.autoNextEnabled.collectAsState(initial = false)
+    // initial 必须和 store 的默认值一致（true）。以前写的是 false，抽屉刚打开的一瞬间
+    // 开关显示为"关"，数据到达后才跳回"开" —— 看起来像设置自己乱跳。
+    val autoNext by settings.autoNextEnabled.collectAsState(initial = true)
     val rememberSpeed by settings.rememberSpeedPerAuthor.collectAsState(initial = false)
 
     ModalBottomSheet(
@@ -159,7 +161,7 @@ fun PlayerSettingsSheet(
             SheetSection(label = "睡眠定时", icon = Icons.Filled.Bedtime) {
                 Column {
                     Text(
-                        "倒计时 ${sleepMin} 分钟后自动暂停",
+                        "默认倒计时 ${sleepMin} 分钟（播放页「定时」里一键启用）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -1,8 +1,6 @@
 package com.tingbili.app.util
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,27 +59,6 @@ object CoverDownloader {
                 out.delete()
                 null
             }
-        }
-    }
-
-    /**
-     * 把锁屏用的 Bitmap 解码出来（最大边缩放到 512px，节省 MediaStyle 通知内存）
-     * 本地文件不存在时返回 null
-     */
-    fun decodeForLockScreen(file: File): Bitmap? {
-        if (!file.exists() || file.length() == 0L) return null
-        return try {
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, opts)
-            val maxEdge = 512
-            var sample = 1
-            val longEdge = maxOf(opts.outWidth, opts.outHeight)
-            while (longEdge / sample > maxEdge) sample *= 2
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-            BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
-        } catch (t: Throwable) {
-            Log.w(TAG, "decode 失败: ${t.message}")
-            null
         }
     }
 
