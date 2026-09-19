@@ -200,6 +200,11 @@ fun SettingsScreen(
                             ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Text(
+                            "0 = 接近极简底色，100 = 完全按封面配色",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
                         Slider(
                             value = paletteStrength.toFloat(),
                             onValueChange = { viewModel.setPaletteStrength(it.toInt()) },
