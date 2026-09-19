@@ -79,7 +79,12 @@ class SettingsStore(private val context: Context) {
     private val keyWebdavPassEnc = stringPreferencesKey("webdav_pass_enc")
     private val keyImmersiveMode = intPreferencesKey("immersive_mode")
     /**
-     * ⚠️ 历史遗留：当年打算做「听单分组模式」，UI 从没接上过，现在也没有任何消费者。
+     * ⚠️ 历史遗留：听单「分组模式」（0 = 按文件夹 / 1 = 按 UP 主）。
+     *
+     * 来历：v0.14.0 上线过完整 UI（听单页顶部两个 FilterChip 切换分组方式，列表按分组折叠）；
+     * v0.17.0 听单页重做时把分组视图整个摘掉，从此只剩存储层、零消费者。
+     * 听单的"归类"需求现在由多标签承担（见 [BookRecord.tag]）。
+     *
      * 保留 key 和快照字段**只是为了让旧备份还能反序列化**（WebDavBackup 用的默认 Json，
      * `ignoreUnknownKeys = false`，快照里少一个字段就会让整份旧备份恢复失败）。
      * 不要为它新增读取方，也不要删。
@@ -94,9 +99,9 @@ class SettingsStore(private val context: Context) {
     private val keyAuthorSpeedMap = stringPreferencesKey("author_speed_map")
     /**
      * ⚠️ 历史遗留：听单分组的 id→folder 映射（"id:folder;id:folder"）。
-     * 和 [keyPlaylistGroupMode] 一样，功能从没接上过、现在零消费者，
+     * 和 [keyPlaylistGroupMode] 同期登场、同期在 v0.17.0 被摘掉 UI，现在零消费者。
      * 保留只为旧备份能反序列化。不要新增读取方，也不要删。
-     * （听单的"归类"需求现在由多标签承担：见 [BookRecord.tag]。）
+     * （key 名沿用 "shelf_folders" 是因为它最早来自已删除的"书架页"。）
      */
     private val keyShelfFolders = stringPreferencesKey("shelf_folders")
     /** 每日收听时长：encode "epochDay:ms;epochDay:ms"（D4 日历统计数据源） */
