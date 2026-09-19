@@ -70,6 +70,78 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 1 ORDER BY favoriteAt DESC")
     fun observeArchivedFavorites(): Flow<List<BookRecord>>
 
+    /**
+     * 只更新「播放进度」三件套 + 最近播放时间，**绝不碰其它列**。
+     *
+     * 为什么必须是列级 UPDATE 而不是 upsert：
+     * 播放层持有的是一条**开始播放那一刻抓的快照**（`PlayerHolder._record`），
+     * 而 `upsert` 是 `@Insert(REPLACE)` —— 整行覆盖。只要用户在播放期间改了标签、
+     * 拖了听单顺序、切了收藏，下一次进度回写（播放中每 5 秒一次、退出播放页一次）
+     * 就会把这条记录**整个还原成开播时的样子**。
+     * 表现就是"标签只能打一个/刚打的标签没了""上移下移点了没反应"。
+     *
+     * 所以：**任何来自播放层的写入都只能走列级 UPDATE**，见 [updatePlayMeta]。
+     */
+    @Query(
+        "UPDATE book_records SET progressMs = :pos, durationMs = :dur, speed = :speed, " +
+            "lastPlayedAt = :ts WHERE id = :id"
+    )
+    override suspend fun updateProgress(id: String, pos: Long, dur: Long, speed: Float, ts: Long): Int
+
+    /**
+     * 更新「播放元数据 + 进度」，同样不碰 tag / sortOrder / isFavorite / favoriteAt / isFinished。
+     * 用于开播时落盘（封面、UP 主、分P 等可能被补全）。
+     * 返回受影响行数：0 表示这条记录还不存在，调用方应改用完整插入。
+     */
+    @Query(
+        "UPDATE book_records SET title = :title, owner = :owner, cover = :cover, " +
+            "totalParts = :totalParts, currentCid = :currentCid, currentPart = :currentPart, " +
+            "bvid = :bvid, auid = :auid, ownerMid = :ownerMid, ownerAvatar = :ownerAvatar, " +
+            "progressMs = :progressMs, durationMs = :durationMs, speed = :speed, " +
+            "lastPlayedAt = :lastPlayedAt WHERE id = :id"
+    )
+    suspend fun updatePlayMeta(
+        id: String,
+        title: String,
+        owner: String,
+        cover: String,
+        totalParts: Int,
+        currentCid: Long?,
+        currentPart: Int,
+        bvid: String?,
+        auid: Long?,
+        ownerMid: Long,
+        ownerAvatar: String,
+        progressMs: Long,
+        durationMs: Long,
+        speed: Float,
+        lastPlayedAt: Long
+    ): Int
+
+    /** 存在就只更新播放相关列，不存在才整行插入（新收藏首次播放） */
+    @Transaction
+    override suspend fun savePlayMetaOrInsert(record: BookRecord): Int {
+        val n = updatePlayMeta(
+            id = record.id,
+            title = record.title,
+            owner = record.owner,
+            cover = record.cover,
+            totalParts = record.totalParts,
+            currentCid = record.currentCid,
+            currentPart = record.currentPart,
+            bvid = record.bvid,
+            auid = record.auid,
+            ownerMid = record.ownerMid,
+            ownerAvatar = record.ownerAvatar,
+            progressMs = record.progressMs,
+            durationMs = record.durationMs,
+            speed = record.speed,
+            lastPlayedAt = record.lastPlayedAt
+        )
+        if (n == 0) upsert(record)
+        return n
+    }
+
     @Query("UPDATE book_records SET isFinished = :finished WHERE id = :id")
     suspend fun setFinished(id: String, finished: Boolean)
 

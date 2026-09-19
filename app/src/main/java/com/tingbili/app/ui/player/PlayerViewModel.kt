@@ -124,15 +124,20 @@ class PlayerViewModel(
         _state.value = _state.value.copy(sleepRemainSec = -1, sleepEndOfTrack = false)
     }
 
+    /**
+     * 退出播放页时落一次进度。
+     *
+     * ⚠️ 只能写进度列：`holder.record` 是**开播那一刻的快照**，用整行 upsert 会把
+     * 播放期间改的标签 / 听单排序 / 收藏状态整体还原回开播时的样子。
+     */
     fun saveProgress() {
         val r = holder.record.value ?: return
         viewModelScope.launch {
-            library.recordPlayed(
-                r.copy(
-                    progressMs = holder.player.currentPosition,
-                    durationMs = holder.player.duration.coerceAtLeast(0L),
-                    speed = holder.player.playbackParameters.speed
-                )
+            library.savePlaybackProgress(
+                id = r.id,
+                pos = holder.player.currentPosition,
+                dur = holder.player.duration.coerceAtLeast(0L),
+                speed = holder.player.playbackParameters.speed
             )
         }
     }

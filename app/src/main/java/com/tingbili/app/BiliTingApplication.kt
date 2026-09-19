@@ -89,8 +89,10 @@ class BiliTingApplication : Application() {
                 }
             }
             // 进度落盘下沉到播放层：从迷你条/通知栏听的时候听单进度条才不会是空的
+            // ⚠️ 必须走 savePlaybackProgress（只写进度列）。传进来的 r 是**开播那一刻的快照**，
+            // 若用 recordPlayed/upsert 整行覆盖，会把播放期间改的标签/排序/收藏全部还原。
             playerHolder.onProgressPersist = { r: com.tingbili.app.data.local.BookRecord ->
-                container.libraryRepo.recordPlayed(r)
+                container.libraryRepo.savePlaybackProgress(r.id, r.progressMs, r.durationMs, r.speed)
             }
         } catch (t: Throwable) {
             Log.e(TAG_BANNER, "PlayerLauncher 初始化失败", t)

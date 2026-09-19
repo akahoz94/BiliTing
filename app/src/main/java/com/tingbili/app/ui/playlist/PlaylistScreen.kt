@@ -56,6 +56,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -230,8 +231,7 @@ fun PlaylistScreen(
                 TagEditor(
                     record = sheetRecord,
                     knownTags = tags,
-                    onToggle = { viewModel.toggleTag(sheetRecord.id, it) },
-                    onClear = { viewModel.setTags(sheetRecord.id, emptyList()) },
+                    onCommit = { viewModel.setTags(sheetRecord.id, it) },
                     onBack = { sheetOnTags = false },
                     onDone = closeSheet
                 )
@@ -301,26 +301,36 @@ private fun PlaylistMenu(
 }
 
 /**
- * 标签编辑（抽屉第二页，多选、边点边存）。
+ * 标签编辑（抽屉第二页，多选、点一下即存）。
  *
  * 之所以塞进抽屉而不是开 AlertDialog：软键盘一弹，AlertDialog 会被整体顶上去，
  * 底部按钮正好被键盘盖住，用户看到的就是"没有返回按键、点都点不动"。
  * 抽屉自带 IME 避让，这一页顶部有"返回菜单"、底部有"完成"，键盘弹着也一定够得着。
+ *
+ * ⚠️ 勾选状态是**本页自己的 local state**，不是直接读 `record.tagSet()`：
+ * 读外部流的话，写库 → Room 失效通知 → 重新查询 → stateIn 发射 这条链有延迟，
+ * 用户连点两下（或第一下还没回流就点第二下）时，第二下会基于**旧值**重算，
+ * 把第一下顶掉 —— 表现就是"打两个标签，另一个自动消失 / 只能打一个"。
+ * 现在以本地选中集为准（点一下立刻高亮、立刻落库），外部数据只用于初始化。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagEditor(
     record: BookRecord,
     knownTags: List<String>,
-    onToggle: (String) -> Unit,
-    onClear: () -> Unit,
+    onCommit: (List<String>) -> Unit,
     onBack: () -> Unit,
     onDone: () -> Unit
 ) {
-    val current = record.tagSet()
+    // 本地选中集：以 record.id 为 key，只在换书时重新初始化
+    var selected by remember(record.id) { mutableStateOf(record.tagSet()) }
     var custom by remember(record.id) { mutableStateOf("") }
-    // 预设 + 听单里已经出现过的标签，去重后一起摆出来
-    val palette = (listOf("通勤", "睡前", "学习", "工作") + knownTags).distinct()
+    val commit: (List<String>) -> Unit = { next ->
+        selected = next
+        onCommit(next)
+    }
+    // 预设 + 听单里已经出现过的标签 + 本页刚加的自定义标签，去重后一起摆出来
+    val palette = (listOf("通勤", "睡前", "学习", "工作") + knownTags + selected).distinct()
 
     Column(
         Modifier
@@ -352,9 +362,10 @@ private fun TagEditor(
         )
         Spacer(Modifier.height(AppTokens.Spacing2))
         Text(
-            text = if (current.isEmpty()) "可以多选，一本书能挂多个标签" else "已选：${current.joinToString("、")}",
+            text = if (selected.isEmpty()) "可以多选，一本书能挂多个标签（点一下即保存）"
+                   else "已选：${selected.joinToString("、")}",
             style = MaterialTheme.typography.bodySmall,
-            color = if (current.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (selected.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = AppTokens.Spacing4)
         )
@@ -367,12 +378,18 @@ private fun TagEditor(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             palette.forEach { tag ->
-                FilterChip(
-                    selected = tag in current,
-                    onClick = { onToggle(tag) },
-                    label = { Text(tag) },
-                    colors = FilterChipDefaults.filterChipColors()
-                )
+                // key(tag)：chip 数量变化（新增标签）时整行会重排，带 key 才能保证
+                // Compose 复用同一个节点 —— 否则手指按下的那一瞬间节点被替换，点击会被取消
+                key(tag) {
+                    FilterChip(
+                        selected = tag in selected,
+                        onClick = {
+                            commit(if (tag in selected) selected - tag else selected + tag)
+                        },
+                        label = { Text(tag) },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
             }
         }
         Spacer(Modifier.height(AppTokens.Spacing4))
@@ -395,7 +412,7 @@ private fun TagEditor(
                 onClick = {
                     val t = custom.trim()
                     if (t.isNotBlank()) {
-                        onToggle(t)
+                        commit(if (t in selected) selected else selected + t)
                         custom = ""
                     }
                 },
@@ -415,8 +432,8 @@ private fun TagEditor(
                 .padding(horizontal = AppTokens.Spacing4),
             horizontalArrangement = Arrangement.spacedBy(AppTokens.Spacing3)
         ) {
-            if (current.isNotEmpty()) {
-                TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
+            if (selected.isNotEmpty()) {
+                TextButton(onClick = { commit(emptyList()) }, modifier = Modifier.weight(1f)) {
                     Text("清空标签", color = MaterialTheme.colorScheme.error)
                 }
             }

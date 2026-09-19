@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,8 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -87,32 +84,6 @@ fun <T> SegmentRow(
                 selected = isSelected(opt),
                 onClick = { onSelect(opt) },
                 modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-/**
- * 横滑 chip 列表：用于关键词、tag 等。
- */
-@Composable
-fun ChipFlow(
-    items: List<String>,
-    selected: Set<String>,
-    onToggle: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    spacing: Dp = AppTokens.Spacing2
-) {
-    LazyRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(spacing),
-        contentPadding = PaddingValues(horizontal = AppTokens.Spacing4)
-    ) {
-        items(items) { tag ->
-            SegmentChip(
-                label = tag,
-                selected = tag in selected,
-                onClick = { onToggle(tag) }
             )
         }
     }

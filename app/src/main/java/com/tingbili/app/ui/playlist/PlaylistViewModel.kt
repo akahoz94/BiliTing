@@ -33,15 +33,17 @@ class PlaylistViewModel(
     /**
      * 标签的「意图快照」：id -> 目标标签列表。
      *
-     * 为什么必须有它（2026-09-19 模拟器实测复现的 bug）：
-     * 原先 `toggleTag` 是「读 allFavorites.value → 算 next → 写库」，而 allFavorites 是
-     * Room 的**观察流** —— 写完库到流发射之间隔着几十毫秒（失效通知 + 重新查询 + stateIn）。
-     * 用户连点两个 tag chip 时，第二次读到的还是**旧值**，于是把第一次的结果整个覆盖：
-     * 表现就是"打两个标签，另一个自动消失"。
+     * 两层防护，缺一不可：
+     *  1. **面板侧**（`PlaylistScreen.TagEditor`）：勾选状态是那一页自己的 local state，
+     *     点击时同步更新、立刻高亮，不依赖 Room 观察流的回流速度；
+     *  2. **列表侧**（这里）：草稿立刻叠到 [allFavorites] 上，卡片标签 / 顶部筛选栏 /
+     *     预设 chip 立刻正确，落库时读的是草稿的当下最新值，连点也不会互相覆盖。
      *
-     * 现在点击时先同步更新这份草稿（意图），再用草稿去驱动 UI 和落库：
-     *  - UI 侧：[allFavorites] 会把草稿叠加上去，所以卡片标签、筛选栏、chip 高亮**立刻**正确；
-     *  - 写入侧：落库时读的是草稿的当下最新值，连点也不会互相覆盖。
+     * 为什么不能直接用 `allFavorites.value` 做「读 → 改 → 写」：
+     * 它是 Room 的**观察流**，写完库到流发射之间隔着「失效通知 + 重新查询 + stateIn」，
+     * 真机上可达几十~上百毫秒。连点两下时第二次读到的还是**旧值**，会把第一次的结果整个覆盖
+     * —— 表现就是"打两个标签，另一个自动消失"（PC 模拟器回流只要几毫秒，所以很难复现）。
+     *
      * 草稿在「DB 值追上意图」后被自动清掉（见 init），保证 DB 始终是最终真相。
      */
     private val _tagDraft = MutableStateFlow<Map<String, List<String>>>(emptyMap())
@@ -105,19 +107,9 @@ class PlaylistViewModel(
 
     fun selectTag(tag: String) { _selectedTag.value = tag }
 
-    /** 覆盖式写入标签；传空列表等于清空该书的全部标签 */
+    /** 覆盖式写入标签；传空列表等于清空该书的全部标签。标签面板每次都提交**完整**选中集。 */
     fun setTags(id: String, tags: List<String>) {
         _tagDraft.update { it + (id to tags) }
-        scheduleTagWrite(id)
-    }
-
-    /** 勾选 / 取消某一个标签（多标签的核心入口） */
-    fun toggleTag(id: String, tag: String) {
-        val cur = _tagDraft.value[id]
-            ?: allFavorites.value.firstOrNull { it.id == id }?.tagSet()
-            ?: emptyList()
-        val next = if (tag in cur) cur - tag else cur + tag
-        _tagDraft.update { it + (id to next) }
         scheduleTagWrite(id)
     }
 
