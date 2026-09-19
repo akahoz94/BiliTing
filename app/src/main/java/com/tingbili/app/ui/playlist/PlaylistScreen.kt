@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BookmarkRemove
 import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
@@ -60,7 +59,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,7 +73,6 @@ import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.ui.components.CoverImage
 import com.tingbili.app.ui.components.EmptyState
 import com.tingbili.app.ui.theme.AppTokens
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -90,8 +87,6 @@ fun PlaylistScreen(
     val selectedTag by viewModel.selectedTag.collectAsState()
     var pendingAction by remember { mutableStateOf<BookRecord?>(null) }
     var showTagDialog by remember { mutableStateOf<BookRecord?>(null) }
-    val scope = rememberCoroutineScope()
-    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         modifier = modifier,
@@ -222,21 +217,6 @@ fun PlaylistScreen(
                 }
                 SheetItem(Icons.Filled.Label, "设置标签") {
                     showTagDialog = record; pendingAction = null
-                }
-                SheetItem(Icons.Filled.Download, "下载缓存") {
-                    val dm = (ctx.applicationContext as com.tingbili.app.BiliTingApplication).container.downloadManager
-                    scope.launch {
-                        dm.download(
-                            recordId = record.id,
-                            bookTitle = record.title,
-                            cover = record.cover,
-                            bvid = record.bvid,
-                            cid = record.currentCid,
-                            auid = record.auid,
-                            partTitle = "全集"
-                        )
-                    }
-                    pendingAction = null
                 }
                 SheetItem(Icons.Filled.Archive, "标为听完归档") {
                     viewModel.setFinished(record.id, true); pendingAction = null
