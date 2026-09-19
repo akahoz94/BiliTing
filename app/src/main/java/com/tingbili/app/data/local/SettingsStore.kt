@@ -120,6 +120,11 @@ class SettingsStore(private val context: Context) {
 
     val playbackSpeed: Flow<Float> = dataStore.data.map { it[keyPlaybackSpeed] ?: 1.0f }.failSafe("playback_speed", 1.0f)
     val sleepMinutes: Flow<Int> = dataStore.data.map { it[keySleepMinutes] ?: 30 }.failSafe("sleep_minutes", 30)
+    /**
+     * 设置项「播完本集自动停止」：**常开**语义（不像睡眠面板里的「听完本集退出」是一次性）。
+     * 打开后每次播完本集都就地停住、不自动续播。与 [autoNextEnabled] 互斥（开它会关掉自动下一集）。
+     * 运行时由 PlayerHolder 统一裁决（停止优先于下一集）。
+     */
     val sleepEndOfTrack: Flow<Boolean> = dataStore.data.map { it[keySleepEndOfTrack] ?: false }.failSafe("sleep_end_of_track", false)
     val themeMode: Flow<Int> = dataStore.data.map { it[keyTheme] ?: 0 }.failSafe("theme_mode", 0)
     val keywords: Flow<Set<String>> = dataStore.data.map { it[keyKeywords] ?: Defaults.KEYWORDS }.failSafe("keywords", Defaults.KEYWORDS)
@@ -131,7 +136,11 @@ class SettingsStore(private val context: Context) {
     val webdavUser: Flow<String> = dataStore.data.map { it[keyWebdavUser] ?: "" }.failSafe("webdav_user", "")
     val immersiveMode: Flow<Int> = dataStore.data.map { it[keyImmersiveMode] ?: 0 }.failSafe("immersive_mode", 0)
     val paletteStrength: Flow<Int> = dataStore.data.map { it[keyPaletteStrength] ?: 60 }.failSafe("palette_strength", 60)
-    val autoNextEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextEnabled] ?: false }.failSafe("auto_next_enabled", false)
+    /**
+     * 设置项「播完本集自动下一集」，默认开（= v0.23.13 之前的实际行为，默认值不能反过来，
+     * 否则老用户一升级就不再自动续播）。关掉等价于「播完停下来」。
+     */
+    val autoNextEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextEnabled] ?: true }.failSafe("auto_next_enabled", true)
     val rememberSpeedPerAuthor: Flow<Boolean> = dataStore.data.map { it[keyRememberSpeedPerAuthor] ?: false }.failSafe("remember_speed_per_author", false)
     val playlistGroupMode: Flow<Int> = dataStore.data.map { it[keyPlaylistGroupMode] ?: 0 }.failSafe("playlist_group_mode", 0)
     val autoSyncEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoSyncEnabled] ?: true }.failSafe("auto_sync_enabled", true)
@@ -174,7 +183,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setPlaybackSpeed(v: Float) = write("playback_speed") { it[keyPlaybackSpeed] = v }
     suspend fun setSleepMinutes(v: Int) = write("sleep_minutes") { it[keySleepMinutes] = v }
-    suspend fun setSleepEndOfTrack(v: Boolean) = write("sleep_end_of_track") { it[keySleepEndOfTrack] = v }
+    suspend fun setSleepEndOfTrack(v: Boolean) = write("sleep_end_of_track") { p ->
+        p[keySleepEndOfTrack] = v
+        if (v) p[keyAutoNextEnabled] = false
+    }
     suspend fun setThemeMode(v: Int) = write("theme_mode") { it[keyTheme] = v }
     suspend fun setKeywords(v: Set<String>) = write("keywords") { it[keyKeywords] = v }
     suspend fun setThemeColor(v: Int) = write("theme_color") { it[keyThemeColor] = v }
@@ -182,7 +194,15 @@ class SettingsStore(private val context: Context) {
     suspend fun setAudioGain(v: Float) = write("audio_gain") { it[keyAudioGain] = v.coerceIn(MIN_GAIN, MAX_GAIN) }
     suspend fun setImmersiveMode(v: Int) = write("immersive_mode") { it[keyImmersiveMode] = v }
     suspend fun setPaletteStrength(v: Int) = write("palette_strength") { it[keyPaletteStrength] = v }
-    suspend fun setAutoNextEnabled(v: Boolean) = write("auto_next_enabled") { it[keyAutoNextEnabled] = v }
+    /**
+     * 两个「播完本集」开关互斥：开了自动下一集就关掉自动停止，反之亦然。
+     * 放在 store 层做（而不是各自 UI 里），是为了让播放页抽屉、设置页、备份恢复
+     * 三条入口拿到的是同一套状态，不会出现「两个都开着」的互相打架组合。
+     */
+    suspend fun setAutoNextEnabled(v: Boolean) = write("auto_next_enabled") { p ->
+        p[keyAutoNextEnabled] = v
+        if (v) p[keySleepEndOfTrack] = false
+    }
     suspend fun setRememberSpeedPerAuthor(v: Boolean) = write("remember_speed_per_author") { it[keyRememberSpeedPerAuthor] = v }
     suspend fun setPlaylistGroupMode(v: Int) = write("playlist_group_mode") { it[keyPlaylistGroupMode] = v }
     suspend fun setAutoSyncEnabled(v: Boolean) = write("auto_sync_enabled") { it[keyAutoSyncEnabled] = v }
@@ -324,7 +344,7 @@ class SettingsStore(private val context: Context) {
             audioOnly = prefs[keyAudioOnly] ?: true,
             immersiveMode = prefs[keyImmersiveMode] ?: 0,
             paletteStrength = prefs[keyPaletteStrength] ?: 60,
-            autoNextEnabled = prefs[keyAutoNextEnabled] ?: false,
+            autoNextEnabled = prefs[keyAutoNextEnabled] ?: true,
             rememberSpeedPerAuthor = prefs[keyRememberSpeedPerAuthor] ?: false,
             playlistGroupMode = prefs[keyPlaylistGroupMode] ?: 0,
             keywords = (prefs[keyKeywords] ?: Defaults.KEYWORDS).toList(),
@@ -336,16 +356,20 @@ class SettingsStore(private val context: Context) {
 
     /** 从快照恢复设置（用于 WebDAV 恢复，不覆盖 WebDAV 凭据） */
     suspend fun importSnapshot(s: SettingsSnapshot) {
+        // 两个「播完本集」开关在旧版本里都是死开关，快照里的 false 很可能只是当时的默认值，
+        // 直接照搬会把新版本的默认行为（自动下一集）关掉。归一化：只有"明确只开了自动停止"
+        // 才认为自动下一集是关的；互相矛盾的组合按自动下一集优先。
+        val autoNext = if (s.autoNextEnabled || s.sleepEndOfTrack) s.autoNextEnabled else true
         write("import_snapshot") { prefs ->
             prefs[keyPlaybackSpeed] = s.playbackSpeed
             prefs[keySleepMinutes] = s.sleepMinutes
-            prefs[keySleepEndOfTrack] = s.sleepEndOfTrack
+            prefs[keySleepEndOfTrack] = s.sleepEndOfTrack && !autoNext
             prefs[keyTheme] = s.themeMode
             prefs[keyThemeColor] = s.themeColor
             prefs[keyAudioOnly] = s.audioOnly
             prefs[keyImmersiveMode] = s.immersiveMode
             prefs[keyPaletteStrength] = s.paletteStrength
-            prefs[keyAutoNextEnabled] = s.autoNextEnabled
+            prefs[keyAutoNextEnabled] = autoNext
             prefs[keyRememberSpeedPerAuthor] = s.rememberSpeedPerAuthor
             prefs[keyPlaylistGroupMode] = s.playlistGroupMode
             prefs[keyKeywords] = s.keywords.toSet()
@@ -366,7 +390,7 @@ data class SettingsSnapshot(
     val audioOnly: Boolean = true,
     val immersiveMode: Int = 0,
     val paletteStrength: Int = 60,
-    val autoNextEnabled: Boolean = false,
+    val autoNextEnabled: Boolean = true,
     val rememberSpeedPerAuthor: Boolean = false,
     val playlistGroupMode: Int = 0,
     val keywords: List<String> = emptyList(),

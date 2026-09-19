@@ -140,14 +140,14 @@ fun PlayerSettingsSheet(
                 Column {
                     ToggleRow(
                         title = "播完本集自动下一集",
-                        subtitle = "末尾自动翻下一P（等同点 ⏭）",
+                        subtitle = "末尾自动翻下一P（等同点 ⏭）；开它会关掉下面那个",
                         checked = autoNext,
                         onCheckedChange = { scope.launch { settings.setAutoNextEnabled(it) } }
                     )
                     Spacer(Modifier.height(8.dp))
                     ToggleRow(
                         title = "播完本集自动停止",
-                        subtitle = "末尾即停，配合睡眠定时用",
+                        subtitle = "末尾即停、不续播（每次生效，睡前常开）；开它会关掉上面那个",
                         checked = sleepEnd,
                         onCheckedChange = { scope.launch { settings.setSleepEndOfTrack(it) } }
                     )

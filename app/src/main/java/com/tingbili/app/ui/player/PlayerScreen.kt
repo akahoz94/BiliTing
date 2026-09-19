@@ -347,8 +347,17 @@ fun PlayerScreen(
             ) {
                 SubAction(icon = "${s.speed}x", label = "倍速", tint = contentColor) { showSpeed = true }
                 SubAction(
-                    icon = if (s.sleepRemainSec > 0) "${(s.sleepRemainSec / 60) + 1}min" else "定时",
-                    label = if (s.sleepRemainSec > 0) "剩余" else "定时",
+                    icon = when {
+                        s.sleepRemainSec > 0 -> "${(s.sleepRemainSec / 60) + 1}min"
+                        s.sleepEndOfTrack -> "本集"
+                        else -> "定时"
+                    },
+                    label = when {
+                        s.sleepRemainSec > 0 -> "剩余"
+                        s.sleepEndOfTrack -> "听完停"
+                        else -> "定时"
+                    },
+                    highlight = s.sleepRemainSec > 0 || s.sleepEndOfTrack,
                     tint = contentColor
                 ) { showSleep = true }
                 SubAction(
@@ -446,9 +455,28 @@ fun PlayerScreen(
             title = { Text("定时关闭") },
             text = {
                 Column {
+                    // 当前生效的模式要写清楚：「听完本集停止」没有倒计时数字，
+                    // 以前点了跟没点一样，用户完全看不出来到底开没开。
+                    Text(
+                        when {
+                            s.sleepEndOfTrack -> "已开启：本集播完后自动停止（不续播下一集）"
+                            s.sleepRemainSec > 0 ->
+                                "已开启：倒计时 ${(s.sleepRemainSec / 60) + 1} 分钟后停止"
+                            else -> "当前未开启定时"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (s.sleepRemainSec > 0 || s.sleepEndOfTrack)
+                            MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
                     listOf(30, 60, 90, 120).forEach { min ->
                         TextButton(
-                            onClick = { viewModel.startSleep(min); showSleep = false },
+                            onClick = {
+                                viewModel.startSleep(min)
+                                ErrorBus.post("已开启：${min} 分钟后自动停止")
+                                showSleep = false
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("$min 分钟", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
@@ -456,11 +484,15 @@ fun PlayerScreen(
                     }
                     Spacer(Modifier.height(4.dp))
                     TextButton(
-                        onClick = { viewModel.startSleepEndOfTrack(); showSleep = false },
+                        onClick = {
+                            viewModel.startSleepEndOfTrack()
+                            ErrorBus.post("已开启：本集播完后自动停止")
+                            showSleep = false
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "听完本集停止",
+                            if (s.sleepEndOfTrack) "✓ 听完本集停止" else "听完本集停止",
                             modifier = Modifier.fillMaxWidth(),
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.primary
@@ -468,7 +500,11 @@ fun PlayerScreen(
                     }
                     if (s.sleepRemainSec > 0 || s.sleepEndOfTrack) {
                         TextButton(
-                            onClick = { viewModel.stopSleep(); showSleep = false },
+                            onClick = {
+                                viewModel.stopSleep()
+                                ErrorBus.post("已取消定时")
+                                showSleep = false
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(

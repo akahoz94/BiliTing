@@ -51,7 +51,7 @@ class SettingsViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val immersiveMode: StateFlow<Int> = store.immersiveMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.Eagerly, 60)
-    val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val playlistGroupMode: StateFlow<Int> = store.playlistGroupMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     /** 云端备份目录（WebDAV 下的子路径） */

@@ -59,13 +59,14 @@ class PlayerViewModel(
                     autoNextFired = true
                     Log.i(
                         "PlayerViewModel",
-                        "ended -> autoNext fired, itemCount=${p.mediaItemCount} idx=${p.currentMediaItemIndex}"
+                        "ended -> autoAdvance=${holder.shouldAutoAdvance()} " +
+                            "itemCount=${p.mediaItemCount} idx=${p.currentMediaItemIndex}"
                     )
-                    if (holder.sleepEndOfTrack.value) {
-                        // 听完本集停止：就到这儿，别自动续播下一集
-                        holder.stopSleep()
-                    } else {
+                    if (holder.shouldAutoAdvance()) {
                         launcher.nextPart()
+                    } else {
+                        // 「播完本集自动停止」或关掉了「自动下一集」：就到这儿
+                        holder.stopSleep()
                     }
                 } else if (!ended) {
                     autoNextFired = false

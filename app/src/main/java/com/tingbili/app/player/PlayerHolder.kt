@@ -94,6 +94,9 @@ class PlayerHolder(
             }
             _player = p
             _trackSelector = trackSel
+            // 新建的播放器默认 pauseAtEndOfMediaItems=false；如果此刻策略要求"末尾停住"，
+            // 必须补一次，否则冷启动那一次播放会漏掉（订阅回调可能早于建播放器跑完）
+            runCatching { if (stopAtEndArmed()) p.setPauseAtEndOfMediaItems(true) }
             attachPlayerListener(p)
             startTracking(p)
             ensureMediaController()
@@ -167,6 +170,8 @@ class PlayerHolder(
     val sleepEndOfTrack: StateFlow<Boolean> = _sleepEndOfTrack
     private var sleepTotalMs: Long = 0L
     private var sleepStartElapsed: Long = 0L
+    /** 本次睡眠定时是"听完本集"还是"倒计时"：只用于触发后给一句不同的提示 */
+    @Volatile private var sleepKindEndOfTrack = false
 
     private val sleepTimer = SleepTimer(
         onFire = {
@@ -175,13 +180,20 @@ class PlayerHolder(
             sleepTotalMs = 0L
             _sleepRemainSec.value = -1
             _sleepEndOfTrack.value = false
+            // 定时真的生效了要给个提示：以前"听完本集停止"触发时悄无声息，
+            // 用户根本不知道是定时停了还是播放出错了。
+            com.tingbili.app.util.ErrorBus.post(
+                if (sleepKindEndOfTrack) "本集已播完，已停止播放"
+                else "定时时间到，已暂停播放"
+            )
         },
         setVolume = { v -> setVolume(v) },
-        setPauseAtEnd = { armed -> setPauseAtEndOfMediaItems(armed) },
+        setPauseAtEnd = { armed -> setSleepArmed(armed) },
         fadeOutMs = 30_000L
     )
 
     fun startSleep(minutes: Int) {
+        sleepKindEndOfTrack = false
         sleepTotalMs = minutes * 60_000L
         sleepStartElapsed = System.currentTimeMillis()
         _sleepRemainSec.value = minutes * 60
@@ -190,6 +202,7 @@ class PlayerHolder(
     }
 
     fun startSleepEndOfTrack() {
+        sleepKindEndOfTrack = true
         sleepTimer.startEndOfTrack()
         sleepTotalMs = 0L
         _sleepRemainSec.value = -1
@@ -208,15 +221,64 @@ class PlayerHolder(
      * 听完本集停止的开关：交给 ExoPlayer 的"本集末尾暂停"（内部 = setPauseAtEndOfWindow）。
      * 打开后本集播完就地停住，不会切进下一集的占位项，也就不会顺着占位继续播下一集。
      * 同样只能在主线程调用（getter/setter 都有线程校验）。
+     *
+     * 注意：这是"睡眠定时"用的一次性开关，[SleepTimer] 独占调用；设置里的两个常开策略
+     * （自动下一集 / 播完自动停止）走 [setAutoNextEnabled] / [setStopAtEndEnabled]。
      */
-    fun setPauseAtEndOfMediaItems(armed: Boolean) {
-        pauseAtEndArmed = armed
-        onMain { runCatching { player.setPauseAtEndOfMediaItems(armed) } }
+    fun setSleepArmed(armed: Boolean) {
+        sleepArmed = armed
+        applyEndPolicy()
     }
 
-    @Volatile private var pauseAtEndArmed = false
+    /** 设置项「播完本集自动下一集」（默认 true）。关掉 = 播完停在末尾 */
+    fun setAutoNextEnabled(enabled: Boolean) {
+        autoNextEnabled = enabled
+        applyEndPolicy()
+    }
+
+    /** 设置项「播完本集自动停止」（默认 false）。打开 = 播完停在末尾（优先级高于自动下一集） */
+    fun setStopAtEndEnabled(enabled: Boolean) {
+        stopAtEndEnabled = enabled
+        applyEndPolicy()
+    }
+
+    /**
+     * 本集末尾是否就地停住。三个来源任一成立都要停：
+     *  1) 睡眠定时点了"听完本集停止"（一次性）
+     *  2) 设置里开了"播完本集自动停止"（常开）
+     *  3) 设置里关掉了"播完本集自动下一集"
+     */
+    private fun stopAtEndArmed(): Boolean = sleepArmed || stopAtEndEnabled || !autoNextEnabled
+
+    /** 播完这一集该不该自动续下一集（PlayerViewModel 的兜底分支也用它） */
+    fun shouldAutoAdvance(): Boolean = !stopAtEndArmed()
+
+    /** 把当前策略落进播放器：只改一次属性，避免三处各自为政 */
+    private fun applyEndPolicy() {
+        val arm = stopAtEndArmed()
+        onMain { runCatching { player.setPauseAtEndOfMediaItems(arm) } }
+    }
+
+    @Volatile private var sleepArmed = false
+    @Volatile private var stopAtEndEnabled = false
+    @Volatile private var autoNextEnabled = true
     @Volatile private var lastIsPlaying = false
     @Volatile private var lastMediaItemCount = 0
+
+    /**
+     * 设置里的两个「播完本集」策略是常开的、跨页面跨启动都要生效，所以在播放器层订阅，
+     * 而不是挂在某个页面的 ViewModel 上（页面一退订就没了）。
+     */
+    init {
+        settingsStore?.let { s ->
+            trackingScope.launch {
+                s.autoNextEnabled.collect { setAutoNextEnabled(it) }
+            }
+            trackingScope.launch {
+                s.sleepEndOfTrack.collect { setStopAtEndEnabled(it) }
+            }
+        }
+    }
 
     fun setAudioOnly(audioOnly: Boolean) {
         val sel = _trackSelector ?: return
@@ -236,12 +298,10 @@ class PlayerHolder(
                 // 之前在这里调 nextPart()（内部拿 currentQueueIndex()+1），而此刻
                 // queueIndex 已经是占位项下标了 —— 等于连跳两集，第 2 集被整段吞掉。
                 val target = mid.substringAfterLast("#part", "").toIntOrNull() ?: return
-                // 听完本集停止：本集已经结束，别再去解析下一集（兜底；正常情况下
-                // pauseAtEnd 已经让播放器就地停住，根本不会切到占位项）
-                if (pauseAtEndArmed) {
-                    sleepTimer.onPlaybackStopped()
-                    return
-                }
+                // 这里**不要**再用"末尾停住"去拦截：末尾停住是由播放器自己完成的
+                // （setPauseAtEndOfMediaItems），正常播到末尾根本不会走到这个回调。
+                // 真正能走到这里的是"人为"切下一项：点 ⏭、通知栏/锁屏切集、或停住后再点播放。
+                // 那种情况下用户就是要走，拦下来反而会卡在不可播的占位项上报错。
                 onSeekToPartRequested?.invoke(target)
             }
 
@@ -249,8 +309,15 @@ class PlayerHolder(
                 lastIsPlaying = playing
                 if (playing) return
                 trackingScope.launch { persistProgress(p) }
-                // 听完本集停止：只有"真的播到本集末尾"才算，用户手动暂停不算
-                if (pauseAtEndArmed && isAtEndOfCurrentItem(p)) sleepTimer.onPlaybackStopped()
+                // 播到末尾的一律给个说法，别让用户猜"是停了还是卡了"
+                if (isAtEndOfCurrentItem(p)) {
+                    when {
+                        // 听完本集停止：由计时器收口（它自己也会提示）
+                        sleepArmed -> sleepTimer.onPlaybackStopped()
+                        stopAtEndEnabled -> com.tingbili.app.util.ErrorBus.post("本集已播完，已按设置停止播放")
+                        !autoNextEnabled -> com.tingbili.app.util.ErrorBus.post("本集已播完，已停止（自动下一集已关闭）")
+                    }
+                }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {

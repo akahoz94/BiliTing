@@ -117,6 +117,7 @@ fun SettingsScreen(
     val immersiveMode by viewModel.immersiveMode.collectAsState()
     val paletteStrength by viewModel.paletteStrength.collectAsState()
     val autoNext by viewModel.autoNextEnabled.collectAsState()
+    val sleepEndOfTrack by viewModel.sleepEndOfTrack.collectAsState()
     val rememberSpeed by viewModel.rememberSpeedPerAuthor.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val coverCacheSize by viewModel.coverCacheSize.collectAsState()
@@ -227,6 +228,13 @@ fun SettingsScreen(
                             subtitle = "开启后到末尾自动翻下一P，无需手动点",
                             checked = autoNext,
                             onCheckedChange = viewModel::setAutoNextEnabled
+                        )
+                        Divider()
+                        SwitchRow(
+                            title = "播完本集自动停止",
+                            subtitle = "末尾即停、不续播（每次生效）。与上一项互斥，开它会关掉自动下一集",
+                            checked = sleepEndOfTrack,
+                            onCheckedChange = viewModel::setSleepEndOfTrack
                         )
                         Divider()
                         SwitchRow(
