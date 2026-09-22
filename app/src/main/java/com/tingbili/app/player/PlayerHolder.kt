@@ -161,6 +161,12 @@ class PlayerHolder(
     var onSeekToPartRequested: ((Int) -> Unit)? = null
     var onProgressPersist: (suspend (BookRecord) -> Unit)? = null
 
+    /**
+     * 「重新解析当前这一集的播放地址并重装」的出口，参数 = 要恢复到的进度。
+     * 只在 [togglePlay] 认定"旧地址已经废了"时调用，见那里的注释。
+     */
+    var onReloadRequested: ((Long) -> Unit)? = null
+
     // ---------------- 睡眠定时（App 级） ----------------
     // 放在这里而不是播放页的 ViewModel 里：页面一退出 ViewModel 就 onCleared，
     // 定时器跟着没了 —— "听完本集停止/倒计时"会随着切 tab 静默失效。
@@ -322,6 +328,12 @@ class PlayerHolder(
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 Log.w("PlayerHolder", "ExoPlayer 错误：${error.errorCodeName} ${error.message}")
+                // 占位项（biliting://placeholder/...）拉不动是设计内的信号（见 buildItems），
+                // 每集都会来一次，不能拿它去骚扰用户。别的错误是真中断了，必须给个说法 ——
+                // 以前只写日志，用户看到的是"点了没反应、也不知道是不是卡了"。
+                if (!isCurrentItemPlaceholder(p)) {
+                    com.tingbili.app.util.ErrorBus.post(message = "播放中断，按播放键会重新加载")
+                }
             }
         })
     }
@@ -334,6 +346,16 @@ class PlayerHolder(
         val d = p.duration
         d > 0L && p.currentPosition >= d - 1_000L
     }.getOrDefault(false)
+
+    /**
+     * 当前装载的是不是"设计内的占位项"（见 [buildItems]：占位项 mediaId 形如 `<id>#partN`）。
+     * 占位项只是为了撑起 timeline 让通知栏有 ⏭，它本来就拉不动，报错是预期行为 ——
+     * 拿它去给用户弹提示的话，每切一集都会弹一次。
+     * 只在播放器回调（主线程）里调用。
+     */
+    private fun isCurrentItemPlaceholder(p: ExoPlayer): Boolean =
+        runCatching { p.currentMediaItem?.mediaId?.contains("#part") == true }
+            .getOrDefault(false)
 
     /**
      * 进度落盘不能只靠播放器页的 ViewModel：从迷你条 / 通知栏 / 锁屏听的时候
@@ -522,9 +544,22 @@ class PlayerHolder(
         onMain {
             if (player.isPlaying) { player.pause(); return@onMain }
             if (hasMedia()) {
-                // 上一次是加载失败（比如换集时源报错）停在 IDLE：此时直接 play() 毫无反应，
-                // 表现为"点播放键没动静"。必须重新 prepare 才会真正去拉流。
+                // 上次加载失败会停在 IDLE。分两种情况：
+                //  1) 网络瞬断这类**可重试**的：重新 prepare 用原地址就拉得起来；
+                //  2) 地址本身已经废了：B 站音频地址带有效期，暂停久了 / 长时间退后台
+                //     之后会过期；换集时源报错、或播放器跨进占位项后没被救回来也是这种。
+                //     此时 prepare 只会拿**同一个废地址**再失败一次，每次都静默回到 IDLE，
+                //     用户看到的就是"点播放毫无反应，只能杀进程重开"（重开之所以有效，
+                //     是因为冷启动走的是 resumeCurrent()，那里会重新解析地址）。
+                //     这种情况必须让上层重新解析地址、重装当前这一集。
                 if (player.playbackState == Player.STATE_IDLE) {
+                    val err = runCatching { player.playerError }.getOrNull()
+                    val reload = onReloadRequested
+                    if (err != null && reload != null) {
+                        Log.i("PlayerHolder", "地址疑似失效（${err.errorCodeName}），改为重新解析后重装")
+                        reload(runCatching { player.currentPosition }.getOrDefault(0L))
+                        return@onMain
+                    }
                     runCatching { player.prepare() }
                 }
                 player.play()

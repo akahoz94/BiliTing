@@ -88,6 +88,17 @@ class BiliTingApplication : Application() {
                         }
                 }
             }
+            // 播放器停在一个已经失效的地址上（B 站地址过期 / 换集源报错 / 跨进占位项没救回来）：
+            // 重新解析当前这一集再重装，否则点播放只会拿废地址再失败一次（"点了没反应，只能重开"）
+            playerHolder.onReloadRequested = { pos ->
+                applicationScope.launch(Dispatchers.Main) {
+                    runCatching { playerLauncher.reloadCurrent(pos) }
+                        .onFailure {
+                            Log.w(TAG_BANNER, "重新加载失败：${it.message}")
+                            com.tingbili.app.util.ErrorBus.post(message = "重新加载失败：${it.message ?: "网络异常"}")
+                        }
+                }
+            }
             // 进度落盘下沉到播放层：从迷你条/通知栏听的时候听单进度条才不会是空的
             // ⚠️ 必须走 savePlaybackProgress（只写进度列）。传进来的 r 是**开播那一刻的快照**，
             // 若用 recordPlayed/upsert 整行覆盖，会把播放期间改的标签/排序/收藏全部还原。

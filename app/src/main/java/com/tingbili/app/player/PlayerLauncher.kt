@@ -124,6 +124,42 @@ class PlayerLauncher(
         playRecord(holder.record.value ?: return)
     }
 
+    /**
+     * 重新解析「当前这一集」的地址并重装，停在原处（队列 / 倍速 / 播放页状态都不变）。
+     *
+     * 存在的唯一理由：B 站音频地址带有效期。暂停久了或长时间退后台，地址会过期；换集时源报错、
+     * 或者播放器跨进占位项没被救回来，也会让播放器停在一个**永远拉不动**的地址上。
+     * 这时如果只 `prepare()`，它拿的是同一个废地址，必然再失败一次 —— 点多少次播放都没反应，
+     * 用户只能杀进程重开（冷启动走 playRecord/resumeCurrent，那里会重新解析地址）。
+     * 这条路径就是替掉那种"只能重开"的处境。
+     */
+    suspend fun reloadCurrent(atMs: Long) {
+        val cur = holder.record.value ?: return
+        val queue = holder.currentQueue()
+        val idx = holder.currentQueueIndex().coerceIn(0, (queue.size - 1).coerceAtLeast(0))
+        val item = queue.getOrNull(idx)
+        // 队列里那一项才是"当前集"的权威来源（bvid+cid）；队列为空（音频稿件/本地文件）时退回 record
+        val url = if (item != null) {
+            playRepo.resolveAudioUrl(item.bvid, item.cid, null)
+        } else {
+            playRepo.resolveAudioUrl(cur.bvid, cur.currentCid, cur.auid)
+        }
+        if (url.isNullOrBlank()) {
+            com.tingbili.app.util.ErrorBus.post(message = "音频地址解析失败，请检查网络后重试")
+            return
+        }
+        val speed = cur.speed.takeIf { it > 0.05f && it < 4f } ?: 1.0f
+        val pos = atMs.coerceAtLeast(0L)
+        val r = if (item != null) {
+            cur.copy(currentCid = item.cid, currentPart = idx + 1, speed = speed)
+        } else {
+            cur.copy(speed = speed)
+        }
+        Log.i("PlayerLauncher", "reloadCurrent id=${r.id} idx=$idx pos=$pos speed=$speed")
+        holder.play(r, url, queue, pos, speed, startIndex = idx)
+        library.savePlaybackProgress(r.id, pos, r.durationMs, speed)
+    }
+
     private suspend fun resolvePerAuthorSpeed(mid: Long): Float? {
         val s = settings ?: return null
         if (mid <= 0L) return null
