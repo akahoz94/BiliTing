@@ -162,10 +162,11 @@ class PlayerHolder(
     var onProgressPersist: (suspend (BookRecord) -> Unit)? = null
 
     /**
-     * 「重新解析当前这一集的播放地址并重装」的出口，参数 = 要恢复到的进度。
-     * 只在 [togglePlay] 认定"旧地址已经废了"时调用，见那里的注释。
+     * 「重新解析当前这一集的播放地址并重装」的出口。
+     * 参数1 = 要恢复到的进度；参数2 = 装好后要不要直接开播（false = 只预装，等用户点）。
+     * 见 [togglePlay] / [checkStall] 里的注释。
      */
-    var onReloadRequested: ((Long) -> Unit)? = null
+    var onReloadRequested: ((Long, Boolean) -> Unit)? = null
 
     // ---------------- 睡眠定时（App 级） ----------------
     // 放在这里而不是播放页的 ViewModel 里：页面一退出 ViewModel 就 onCleared，
@@ -271,6 +272,16 @@ class PlayerHolder(
     @Volatile private var lastIsPlaying = false
     @Volatile private var lastMediaItemCount = 0
 
+    // ---------------- 播放地址保鲜 ----------------
+    // B 站的音频地址带有效期（URL 里带 deadline），别的听书软件用的是自家长期有效
+    // 的地址，所以它们"退后台再回来点一下就能听"。我们要靠自己把这件事补上：
+    //   · 记下地址是什么时候解析出来的，超过 [STALE_URL_MS] 就当它已经废了；
+    //   · 记住用户最后是想"播"还是想"停"，回来恢复时才不会把暂停态的书自动播起来。
+    @Volatile private var lastResolvedAtMs = 0L
+    @Volatile private var userPlayIntent = false
+    @Volatile private var autoReloadAttempts = 0
+    @Volatile private var lastAutoReloadElapsed = 0L
+
     /**
      * 设置里的两个「播完本集」策略是常开的、跨页面跨启动都要生效，所以在播放器层订阅，
      * 而不是挂在某个页面的 ViewModel 上（页面一退订就没了）。
@@ -332,11 +343,84 @@ class PlayerHolder(
                 // 每集都会来一次，不能拿它去骚扰用户。别的错误是真中断了，必须给个说法 ——
                 // 以前只写日志，用户看到的是"点了没反应、也不知道是不是卡了"。
                 if (!isCurrentItemPlaceholder(p)) {
-                    com.tingbili.app.util.ErrorBus.post(message = "播放中断，按播放键会重新加载")
+                    com.tingbili.app.util.ErrorBus.post(message = "播放中断，正在重新获取播放地址")
+                    tryAutoReload(p)
                 }
             }
         })
     }
+
+    /**
+     * 播着播着断了（地址过期 / 网络抖动）：不用等用户点播放，自己重解析一次续上。
+     * 节流 + 次数上限是必须的 —— 真断网时这里会以秒级频率回调，无上限就变成
+     * 疯狂打解析接口的重试风暴。每次成功装载（[play]）都会把计数清零。
+     */
+    private fun tryAutoReload(p: ExoPlayer) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (autoReloadAttempts >= MAX_AUTO_RELOAD) return
+        if (now - lastAutoReloadElapsed < AUTO_RELOAD_MIN_GAP_MS) return
+        val reload = onReloadRequested ?: return
+        autoReloadAttempts++
+        lastAutoReloadElapsed = now
+        val pos = runCatching { p.currentPosition }.getOrDefault(0L)
+        Log.i("PlayerHolder", "播放中断，自动重新解析地址（第 $autoReloadAttempts 次）")
+        reload(pos, true)
+    }
+
+    /** 手上的地址是不是已经"过期到该换一张"了（见 [STALE_URL_MS]） */
+    private fun isUrlStale(nowMs: Long = System.currentTimeMillis()): Boolean =
+        lastResolvedAtMs > 0L && nowMs - lastResolvedAtMs > STALE_URL_MS
+
+    /**
+     * 回到前台时体检一次：现在这个播放器还能不能"一点就响"。
+     * 必须在**主线程**调用（里面要读播放器）。
+     *
+     * 两种需要换地址的情况：
+     *  1) 死局：停在 IDLE 且身上挂着错误 —— 地址已经废了，点播放必然再失败一次；
+     *  2) 陈旧：地址解析出来已经超过 [STALE_URL_MS]，现在点播放只会把残留缓冲放完再断，
+     *     用户体感就是"听两句又停了"。
+     *
+     * [StallCheck.resumePlay] 决定装好之后要不要直接播：
+     * 死局时看用户最后一次意图（[userPlayIntent]），陈旧时看当前是否正在播 ——
+     * 这样"退后台时是暂停的"回来不会自己响起来。
+     */
+    fun checkStall(nowMs: Long = System.currentTimeMillis()): StallCheck {
+        if (!hasMedia()) {
+            Log.i("PlayerHolder", "checkStall: 播放器里没有媒体，跳过")
+            return StallCheck(false, false, 0L)
+        }
+        val p = runCatching { player }.getOrNull() ?: return StallCheck(false, false, 0L)
+        val state = runCatching { p.playbackState }.getOrDefault(Player.STATE_IDLE)
+        val err = runCatching { p.playerError }.getOrNull()
+        // 已经装了媒体却停在 IDLE = 播放器自己不会往下走了（ExoPlayer 不会无故回 IDLE，
+        // 只可能是加载失败 / 被 stop 过）。此时点播放要么毫无反应，要么拿废地址再失败。
+        // 不看 playerError 有没有值：跨进占位项之后错误可能已被清掉，但状态同样是死的。
+        //
+        // 停在 ENDED 且当前项是占位项，也是同一种死局：占位项是个假地址（`biliting://`），
+        // 它"播完"意味着播放器卡在一集根本不存在的媒体上，点播放只会再失败一次。
+        // 但 ENDED + 真实项 是"本集听完了"，那是正常终态，绝不能去动它。
+        val onPlaceholder = isCurrentItemPlaceholder(p)
+        val dead = state == Player.STATE_IDLE || (state == Player.STATE_ENDED && onPlaceholder)
+        val stale = isUrlStale(nowMs)
+        if (!dead && !stale) {
+            Log.i("PlayerHolder", "checkStall: 健康 state=$state 占位项=$onPlaceholder 距上次解析=${nowMs - lastResolvedAtMs}ms")
+            return StallCheck(false, false, 0L)
+        }
+        val pos = runCatching { p.currentPosition }.getOrDefault(0L)
+        val resume = if (dead) userPlayIntent
+        else runCatching { p.isPlaying }.getOrDefault(false)
+        Log.i("PlayerHolder", "checkStall dead=$dead stale=$stale resume=$resume pos=$pos err=${err?.errorCodeName}")
+        return StallCheck(true, resume, pos)
+    }
+
+    data class StallCheck(
+        /** 需要重新解析地址并重装 */
+        val needReload: Boolean,
+        /** 装好之后要不要直接开播 */
+        val resumePlay: Boolean,
+        /** 要恢复到的进度 */
+        val atMs: Long
+    )
 
     /**
      * 只在播放器回调（主线程）里调用：确认是"播到本集末尾"而不是中途暂停。
@@ -471,18 +555,24 @@ class PlayerHolder(
         queue: List<PartItem>,
         positionMs: Long,
         speed: Float,
-        startIndex: Int = 0
+        startIndex: Int = 0,
+        autoPlay: Boolean = true
     ) {
         _record.value = record
         this.queue = queue
         this.queueIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
         currentAudioUrl = audioUrl
+        // 这张地址是刚解析出来的：保鲜计时从现在开始，自动重解析的次数也重新计数
+        lastResolvedAtMs = System.currentTimeMillis()
+        autoReloadAttempts = 0
+        userPlayIntent = autoPlay
 
         onMain {
             player.setMediaItems(buildItems(record, audioUrl, queue, queueIndex), queueIndex, positionMs)
             player.playbackParameters = PlaybackParameters(speed)
             player.prepare()
-            player.play()
+            // autoPlay=false 是"只预装、等用户点"：回来恢复时用户本来是暂停的就别自己响
+            player.playWhenReady = autoPlay
             lastMediaItemCount = player.mediaItemCount
         }
 
@@ -552,15 +642,29 @@ class PlayerHolder(
                 //     用户看到的就是"点播放毫无反应，只能杀进程重开"（重开之所以有效，
                 //     是因为冷启动走的是 resumeCurrent()，那里会重新解析地址）。
                 //     这种情况必须让上层重新解析地址、重装当前这一集。
-                if (player.playbackState == Player.STATE_IDLE) {
+                val st = player.playbackState
+                // 停在 IDLE，或者停在"占位项播完"的 ENDED：两者都是假/废地址造成的死局，
+                // 继续 play()/prepare() 只会拿同一个地址再失败一次。一律重解析重装。
+                if (st == Player.STATE_IDLE || (st == Player.STATE_ENDED && isCurrentItemPlaceholder(player))) {
                     val err = runCatching { player.playerError }.getOrNull()
                     val reload = onReloadRequested
-                    if (err != null && reload != null) {
-                        Log.i("PlayerHolder", "地址疑似失效（${err.errorCodeName}），改为重新解析后重装")
-                        reload(runCatching { player.currentPosition }.getOrDefault(0L))
+                    if (reload != null) {
+                        Log.i("PlayerHolder", "播放器停在 $st（${err?.errorCodeName ?: "无错误对象"}），改为重新解析后重装")
+                        reload(runCatching { player.currentPosition }.getOrDefault(0L), true)
                         return@onMain
                     }
                     runCatching { player.prepare() }
+                }
+                userPlayIntent = true
+                // 地址已经超出保鲜期：现在 play() 只会把残留的几十秒缓冲放完再断掉，
+                // 体感就是"听两句又停了，得再点一次"。趁这一下直接换张新地址。
+                if (isUrlStale()) {
+                    val reload = onReloadRequested
+                    if (reload != null) {
+                        Log.i("PlayerHolder", "地址已超保鲜期，先重新解析再播")
+                        reload(runCatching { player.currentPosition }.getOrDefault(0L), true)
+                        return@onMain
+                    }
                 }
                 player.play()
                 return@onMain
@@ -583,7 +687,7 @@ class PlayerHolder(
         }
     }
 
-    fun pause() = onMain { player.pause() }
+    fun pause() = onMain { userPlayIntent = false; player.pause() }
     /** 播放态读缓存（由播放器回调在主线程维护）：任何线程都能安全读，不会触发线程校验 */
     fun isPlaying(): Boolean = lastIsPlaying
     fun togglePlayPause() {
@@ -606,5 +710,18 @@ class PlayerHolder(
     companion object {
         const val MIN_GAIN = 0.5f
         const val MAX_GAIN = 3.0f
+
+        /**
+         * 播放地址的保鲜期。B 站 playurl 出来的地址带有效期（URL 里带 deadline 参数，
+         * 实测撑不过一两个小时），超时之后请求会被拒。取 10 分钟留足余量：
+         * 超过就当废票，回前台 / 点播放时先悄悄换一张，用户点下去就响。
+         */
+        const val STALE_URL_MS = 10 * 60 * 1000L
+
+        /** 一次装载之后最多自动重解析几次（真断网时要停下来，不能无限重试） */
+        const val MAX_AUTO_RELOAD = 3
+
+        /** 两次自动重解析的最小间隔，防止错误回调密集时打成重试风暴 */
+        const val AUTO_RELOAD_MIN_GAP_MS = 20_000L
     }
 }

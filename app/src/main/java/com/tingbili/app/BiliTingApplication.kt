@@ -1,5 +1,6 @@
 package com.tingbili.app
 
+import android.app.Activity
 import android.app.Application
 import android.util.Log
 import com.tingbili.app.data.api.AudioApi
@@ -90,9 +91,9 @@ class BiliTingApplication : Application() {
             }
             // 播放器停在一个已经失效的地址上（B 站地址过期 / 换集源报错 / 跨进占位项没救回来）：
             // 重新解析当前这一集再重装，否则点播放只会拿废地址再失败一次（"点了没反应，只能重开"）
-            playerHolder.onReloadRequested = { pos ->
+            playerHolder.onReloadRequested = { pos, autoPlay ->
                 applicationScope.launch(Dispatchers.Main) {
-                    runCatching { playerLauncher.reloadCurrent(pos) }
+                    runCatching { playerLauncher.reloadCurrent(pos, autoPlay) }
                         .onFailure {
                             Log.w(TAG_BANNER, "重新加载失败：${it.message}")
                             com.tingbili.app.util.ErrorBus.post(message = "重新加载失败：${it.message ?: "网络异常"}")
@@ -133,6 +134,10 @@ class BiliTingApplication : Application() {
                 .onFailure { Log.w(TAG_BANNER, "WebDAV 密码迁移失败", it) }
         }
 
+        // 回到前台自动恢复：B 站地址带有效期，退后台久了回来会"点了没反应 / 听两句就断"。
+        // 别的听书软件用长期有效地址所以没这毛病，我们在回前台这一刻把地址换好。
+        installForegroundRecovery()
+
         // 启动自动同步：先自举外置配置（重装后靠它把 WebDAV 凭证找回来），再与云端合并一次。
         // 没配 WebDAV 或用户关掉开关时静默跳过，绝不影响启动。
         applicationScope.launch(Dispatchers.IO) {
@@ -147,6 +152,48 @@ class BiliTingApplication : Application() {
                         Log.i(TAG_BANNER, "启动同步跳过（未配置 WebDAV 或已关闭自动同步）")
                 }
             }.onFailure { Log.w(TAG_BANNER, "启动同步异常", it) }
+        }
+    }
+
+    // ---------------- 回到前台自动换地址 ----------------
+    // 用户的原话是"别的听书软件没有这种问题，退到后台再打开还能听"。根子在 B 站的
+    // 音频地址带有效期：放久了它就是一张废票。别的 App 用的是自家长期有效地址，所以
+    // 一点就响。我们没有长期地址，就只能"在你回到前台的那一刻把票换好"——
+    // 这样点播放跟别的 App 一样是立刻出声，不需要先手工点两下、也不需要先放完残留缓冲。
+    private var startedActivities = 0
+
+    private fun installForegroundRecovery() {
+        registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) {
+                if (startedActivities++ == 0) onAppForeground()
+            }
+
+            override fun onActivityStopped(activity: Activity) {
+                if (--startedActivities <= 0) startedActivities = 0
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+    }
+
+    /** 回到前台：体检一次，需要换票就换。回调本身在主线程，读播放器安全。 */
+    private fun onAppForeground() {
+        val holder = runCatching { playerHolder }.getOrNull() ?: return
+        val launcher = runCatching { playerLauncher }.getOrNull() ?: return
+        val check = runCatching { holder.checkStall() }.getOrNull() ?: return
+        Log.i(TAG_BANNER, "回到前台体检：needReload=${check.needReload} resumePlay=${check.resumePlay} pos=${check.atMs}")
+        if (!check.needReload) return
+        Log.i(
+            TAG_BANNER,
+            "回到前台：地址已失效/过期，重新解析后${if (check.resumePlay) "自动续播" else "预装待播"} pos=${check.atMs}"
+        )
+        applicationScope.launch(Dispatchers.Main) {
+            runCatching { launcher.reloadCurrent(check.atMs, check.resumePlay) }
+                .onFailure { Log.w(TAG_BANNER, "回前台恢复失败：${it.message}") }
         }
     }
 

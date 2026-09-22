@@ -133,7 +133,7 @@ class PlayerLauncher(
      * 用户只能杀进程重开（冷启动走 playRecord/resumeCurrent，那里会重新解析地址）。
      * 这条路径就是替掉那种"只能重开"的处境。
      */
-    suspend fun reloadCurrent(atMs: Long) {
+    suspend fun reloadCurrent(atMs: Long, autoPlay: Boolean = true) {
         val cur = holder.record.value ?: return
         val queue = holder.currentQueue()
         val idx = holder.currentQueueIndex().coerceIn(0, (queue.size - 1).coerceAtLeast(0))
@@ -155,8 +155,8 @@ class PlayerLauncher(
         } else {
             cur.copy(speed = speed)
         }
-        Log.i("PlayerLauncher", "reloadCurrent id=${r.id} idx=$idx pos=$pos speed=$speed")
-        holder.play(r, url, queue, pos, speed, startIndex = idx)
+        Log.i("PlayerLauncher", "reloadCurrent id=${r.id} idx=$idx pos=$pos speed=$speed autoPlay=$autoPlay")
+        holder.play(r, url, queue, pos, speed, startIndex = idx, autoPlay = autoPlay)
         library.savePlaybackProgress(r.id, pos, r.durationMs, speed)
     }
 
