@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -14,8 +14,8 @@ android {
         applicationId = "com.tingbili.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 71
-        versionName = "0.23.19"
+        versionCode = 90
+        versionName = "0.26.7"
     }
 
     signingConfigs {
@@ -66,6 +66,18 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
+    // 本地单测里 android.os.Looper / android.util.Log 等框架方法默认会抛 `not mocked`；
+    // 让桩方法返回默认值（null/0/false）而非抛异常，SleepTimerTest / ApiSmokeTest 才能在 JVM 里跑。
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+// 中文项目路径在 JDK17 下：Gradle fork 的测试 worker 用 @argfile 传 classpath，
+// 启动器按系统 GBK 解码 UTF-8 写入的 argfile 会乱码 → 测试类 ClassNotFoundException。
+// 强制测试 JVM 以 UTF-8 启动，与 gradle.properties 的 -Dfile.encoding=UTF-8 对齐。
+tasks.withType<Test>().configureEach {
+    jvmArgs("-Dfile.encoding=UTF-8")
 }
 
 dependencies {
@@ -94,6 +106,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.coil.compose)
+    // B站扫码登录的二维码生成：纯 Java 编码器，无传递依赖，官方 wiki 唯一推荐
+    implementation("com.google.zxing:core:3.5.3")
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

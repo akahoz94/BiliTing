@@ -13,7 +13,7 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("SELECT * FROM book_records ORDER BY lastPlayedAt DESC LIMIT 1")
     suspend fun getMostRecent(): BookRecord?
 
-    @Query("SELECT * FROM book_records ORDER BY lastPlayedAt DESC")
+    @Query("SELECT * FROM book_records WHERE lastPlayedAt > 0 ORDER BY lastPlayedAt DESC")
     fun observeHistory(): Flow<List<BookRecord>>
 
     @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 0 ORDER BY sortOrder ASC, favoriteAt DESC")
@@ -25,7 +25,7 @@ interface BookRecordDao : LibraryRepository.Dao {
      * 会把它们的 sortOrder 和别的标签搅在一起，所以要按全量顺序整体重编号。
      */
     @Query("SELECT * FROM book_records WHERE isFavorite = 1 AND isFinished = 0 ORDER BY sortOrder ASC, favoriteAt DESC")
-    suspend fun favoritesNow(): List<BookRecord>
+    override suspend fun favoritesNow(): List<BookRecord>
 
     /**
      * 标签写入。字段存的是**分号分隔的多标签串**（见 [BookRecord.tag] 的说明），
@@ -118,7 +118,13 @@ interface BookRecordDao : LibraryRepository.Dao {
         lastPlayedAt: Long
     ): Int
 
-    /** 存在就只更新播放相关列，不存在才整行插入（新收藏首次播放） */
+    /**
+     * 存在就只更新播放相关列，不存在才整行插入（新收藏首次播放）。
+     *
+     * 已知极小 TOCTOU 窗口：先 UPDATE 判行数、再据 0 行 INSERT，两步之间若另一协程
+     * 恰好插入了同一 id，INSERT 会撞主键。当前播放写入都是单路（开播/进度回写），
+     * 并发概率可忽略；真要修应改 Room 的 @Upsert 或 INSERT ... ON CONFLICT 列级更新。
+     */
     @Transaction
     override suspend fun savePlayMetaOrInsert(record: BookRecord): Int {
         val n = updatePlayMeta(
@@ -145,6 +151,23 @@ interface BookRecordDao : LibraryRepository.Dao {
     @Query("UPDATE book_records SET isFinished = :finished WHERE id = :id")
     suspend fun setFinished(id: String, finished: Boolean)
 
-    @Query("DELETE FROM book_records")
-    suspend fun clearAll()
+    /** 睡前标记：列级 UPDATE（不整行覆盖，避免抹掉 tag/sortOrder/isFavorite）。新标记覆盖旧的。 */
+    @Query("UPDATE book_records SET markPart = :part, markMs = :ms, markAt = :at WHERE id = :id")
+    override suspend fun updateMark(id: String, part: Int, ms: Long, at: Long)
+
+    /** 清除睡前标记：三列置 NULL。 */
+    @Query("UPDATE book_records SET markPart = NULL, markMs = NULL, markAt = NULL WHERE id = :id")
+    override suspend fun clearMark(id: String)
+
+    /** 跳过片头秒数：列级 UPDATE，不整行覆盖（见 [LibraryRepository.setIntroSec]）。 */
+    @Query("UPDATE book_records SET introSec = :sec WHERE id = :id")
+    override suspend fun setIntroSec(id: String, sec: Int)
+
+    /**
+     * 清空「收听历史」= 把 lastPlayedAt 归零，让记录从历史列表消失。
+     * 绝不能写成 DELETE FROM book_records：历史、听单、收藏是**同一张表**，
+     * 删表等于把用户的收藏和标签一起清光（历史上就这么错过一次）。
+     */
+    @Query("UPDATE book_records SET lastPlayedAt = 0")
+    suspend fun clearHistory()
 }

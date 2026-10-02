@@ -15,6 +15,8 @@ import com.tingbili.app.data.repo.LibraryRepository
 import com.tingbili.app.player.PartItem
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
+import com.tingbili.app.util.ErrorBus
+import com.tingbili.app.util.FormatUtil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +45,17 @@ class PlayerViewModel(
     val state: StateFlow<UiState> = _state
 
     private var autoNextFired = false
+
+    // ===== 睡前标记（书签） =====
+    /** 打开播放页后，是否要弹"跳回标记"的对话框。 */
+    private val _showMarkPrompt = MutableStateFlow(false)
+    val showMarkPrompt: StateFlow<Boolean> = _showMarkPrompt
+
+    /** 本次会话内已点过"忽略"：不再自动弹（不持久化，下次进 App 还会提示）。 */
+    private var suppressMarkPrompt = false
+
+    /** 进页只检查一次，避免每 500ms 轮询重复弹窗。 */
+    private var markPromptChecked = false
 
     // 睡眠定时器本体在 PlayerHolder（App 级）：这里只做转发 + UI 状态镜像。
     // 早前放在本 ViewModel 里有两个致命问题：
@@ -82,6 +95,7 @@ class PlayerViewModel(
                     queue = holder.currentQueue(),
                     queueIndex = holder.currentQueueIndex()
                 )
+                checkMarkPromptOnce()
                 // 每 10 次循环（约 5 秒）落盘一次进度，防止系统回收/强杀丢进度
                 ticks++
                 if (ticks % 10 == 0 && p.isPlaying) saveProgress()
@@ -148,6 +162,81 @@ class PlayerViewModel(
         holder.updateRecord(r.copy(isFavorite = newFav))
         _state.value = _state.value.copy(record = r.copy(isFavorite = newFav))
         viewModelScope.launch { library.toggleFavorite(r.id, newFav) }
+    }
+
+    // ===== 睡前标记（书签）操作 =====
+
+    /**
+     * 把"当前听到的位置"记为睡前标记。主线程读 positionMs + 当前集号，
+     * 落库后顺手更新内存快照（书签图标立刻变实心）。一本书一个标记，新的覆盖旧的。
+     */
+    fun markCurrentPosition() {
+        val r = holder.record.value ?: return
+        val pos = holder.player.currentPosition.coerceAtLeast(0L)
+        val part = holder.currentQueueIndex() + 1
+        viewModelScope.launch {
+            library.setMark(r.id, part, pos)
+            val updated = r.copy(markPart = part, markMs = pos, markAt = System.currentTimeMillis())
+            holder.updateRecord(updated)
+            _state.value = _state.value.copy(record = updated)
+            ErrorBus.post("已标记第 $part 集 ${FormatUtil.progress(pos)}，晚安")
+        }
+    }
+
+    /** 清除睡前标记。 */
+    fun clearMark() {
+        val r = holder.record.value ?: return
+        viewModelScope.launch {
+            library.clearMark(r.id)
+            val updated = r.copy(markPart = null, markMs = null, markAt = null)
+            holder.updateRecord(updated)
+            _state.value = _state.value.copy(record = updated)
+            ErrorBus.post("已清除睡前标记")
+        }
+    }
+
+    /**
+     * 跳过片头：这本书每一集开头跳过的秒数（0 = 不跳）。落库 + 刷新内存快照，
+     * 本集不动（片头已经过去了），从下一次装载——自动下一集 / 手动切集 / 重开这本书——起生效。
+     */
+    fun setIntroSec(sec: Int) {
+        val r = holder.record.value ?: return
+        val v = sec.coerceIn(0, 600)
+        viewModelScope.launch {
+            library.setIntroSec(r.id, v)
+            val updated = r.copy(introSec = v)
+            holder.updateRecord(updated)
+            _state.value = _state.value.copy(record = updated)
+            ErrorBus.post(if (v == 0) "已取消跳过片头" else "已设为每集跳过前 $v 秒，下一集起生效")
+        }
+    }
+
+    /** 跳回睡前标记位置。 */
+    fun jumpToMark() {
+        _showMarkPrompt.value = false
+        viewModelScope.launch { launcher.jumpToMark() }
+    }
+
+    /** 本次会话忽略弹窗：之后不再自动提示。 */
+    fun dismissMarkPrompt() {
+        suppressMarkPrompt = true
+        _showMarkPrompt.value = false
+    }
+
+    /**
+     * 进播放页时检查一次：有标记且当前进度已经"越过"它（听到更后面了），
+     * 就弹一次"要跳回去补听吗"。已忽略过 / 刚标记过不弹。
+     */
+    private fun checkMarkPromptOnce() {
+        if (markPromptChecked || suppressMarkPrompt) return
+        val r = _state.value.record ?: return
+        val markPart = r.markPart ?: return
+        val markMs = r.markMs ?: return
+        markPromptChecked = true
+        val currentPart = r.currentPart
+        val passed = currentPart > markPart ||
+            (currentPart == markPart && _state.value.positionMs > markMs + 3_000L)
+        if (passed) _showMarkPrompt.value = true
     }
 
     override fun onCleared() {

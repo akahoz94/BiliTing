@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -229,8 +231,27 @@ fun SearchScreen(
                 )
             }
 
+            // 搜索期间老结果还在屏上，不给个"搜索中…"就看不出请求已经发出去了
+            if (s.loading) {
+                Text(
+                    "搜索中…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Serif
+                    ),
+                    modifier = Modifier.padding(AppTokens.Spacing3)
+                )
+            }
+
+            // 换关键词/换类型/开关有声过滤都是一次全新搜索：列表要回到顶端，
+            // 不然结果换了、眼睛还停在上一页中间，看起来就像"点了没反应"。
+            // 加载更多（page+1）不动这三个值，所以不会被拽回顶部。
+            val listState = rememberLazyListState()
+            LaunchedEffect(s.keyword, s.type, s.listeningOnly) { listState.scrollToItem(0) }
+
             LazyColumn(
-                Modifier.fillMaxSize(),
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(AppTokens.Spacing4),
                 verticalArrangement = Arrangement.spacedBy(AppTokens.Spacing3)
             ) {

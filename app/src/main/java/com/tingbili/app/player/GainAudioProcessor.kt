@@ -1,8 +1,10 @@
 package com.tingbili.app.player
 
+import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -32,6 +34,7 @@ import java.nio.ByteOrder
  *     `clear()` 掉（同一对象时），所以起止位置必须提前取。
  *  → 所以：位置只提前取一次，读写一律用绝对下标（get/put(index)），最后统一摆好 position。
  */
+@OptIn(UnstableApi::class)
 class GainAudioProcessor : BaseAudioProcessor() {
 
     @Volatile

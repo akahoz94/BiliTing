@@ -97,8 +97,14 @@ class DiscoverViewModel(
 
     /** 该分类页第一次露面时调用；失败后由 retry 重新进入 */
     fun ensureLoaded(category: DiscoverCategory) {
-        if (!started.add(category.label)) return
-        load(category, 1)
+        if (started.add(category.label)) {
+            load(category, 1)
+            return
+        }
+        // 空结果不算"已加载完成"：B站风控会一次性回 code=0 + 空 result（cookie 同时下发），
+        // 拉空过的分类切回来时重拉一次，别把用户钉死在白屏上
+        val feed = _feeds.value[category.label] ?: return
+        if (!feed.loading && feed.items.isEmpty()) load(category, 1)
     }
 
     /** 滚到底自动续页 */

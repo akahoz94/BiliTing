@@ -115,11 +115,16 @@ fun AuthorScreen(
 
             if (s.error != null && s.videos.isEmpty()) {
                 item {
-                    Text(
-                        s.error!!,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(16.dp)
-                    )
+                    Column {
+                        Text(
+                            s.error!!,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                        TextButton(onClick = viewModel::retry, modifier = Modifier.padding(start = 12.dp)) {
+                            Text("重试一次")
+                        }
+                    }
                 }
             }
 

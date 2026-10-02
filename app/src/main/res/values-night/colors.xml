@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面 Widget 深色卡片配色 -->
+    <color name="widget_accent">#FB7299</color>
+    <color name="widget_card_bg">#1A1A2E</color>
+    <color name="widget_text_primary">#ECECF4</color>
+    <color name="widget_text_secondary">#9A9AAF</color>
+</resources>

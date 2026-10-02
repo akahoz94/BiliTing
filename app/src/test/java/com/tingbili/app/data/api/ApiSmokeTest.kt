@@ -12,7 +12,7 @@ class ApiSmokeTest {
     private val cookie =
         "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
     private val service: BiliApiService =
-        buildRetrofit(buildHttpClient(cookie)).create(BiliApiService::class.java)
+        buildRetrofit(buildHttpClient({ cookie })).create(BiliApiService::class.java)
     private val keys = WbiKeyStore(service)
 
     @Test

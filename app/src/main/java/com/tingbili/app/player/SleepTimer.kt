@@ -41,20 +41,43 @@ class SleepTimer(
         stop()
         endOfTrackMode = false
         totalMs = minutes * 60_000L
-        job = scope.launch {
-            val fadeStart = (totalMs - fadeOutMs).coerceAtLeast(0L)
-            delay(fadeStart)
-            // 进入淡出区间：每秒把音量逐步降低
-            val steps = 30
-            val stepDelay = (fadeOutMs / steps).coerceAtLeast(100L)
-            for (i in steps downTo 0) {
-                onMain { setVolume(i / steps.toFloat()) }
-                delay(stepDelay)
-            }
+        job = scope.launch { runCountdown(totalMs) }
+    }
+
+    /**
+     * 摇一摇延长：取消当前倒计时，按"剩余 + 延长"重启，保留 fadeOutMs 淡出逻辑。
+     * 不恢复音量（正在听，别把音量突然拉满）。听完本集模式下不延长（没有倒计时可加）。
+     */
+    fun extend(remainingMs: Long) {
+        if (endOfTrackMode) return
+        stopWithoutRestore()
+        endOfTrackMode = false
+        totalMs = remainingMs.coerceAtLeast(0L)
+        job = scope.launch { runCountdown(totalMs) }
+    }
+
+    /** 倒计时 + 结尾淡出。单独抽出便于 start/extend 复用。 */
+    private suspend fun runCountdown(totalMs: Long) {
+        // 0 分钟（立即触发）直接 fire，不走淡出循环；否则会被 fadeOutMs(30s) 拖住。
+        if (totalMs <= 0L) {
             onMain {
                 setVolume(0f)
                 onFire()
             }
+            return
+        }
+        val fadeStart = (totalMs - fadeOutMs).coerceAtLeast(0L)
+        delay(fadeStart)
+        // 进入淡出区间：每秒把音量逐步降低
+        val steps = 30
+        val stepDelay = (fadeOutMs / steps).coerceAtLeast(100L)
+        for (i in steps downTo 0) {
+            onMain { setVolume(i / steps.toFloat()) }
+            delay(stepDelay)
+        }
+        onMain {
+            setVolume(0f)
+            onFire()
         }
     }
 

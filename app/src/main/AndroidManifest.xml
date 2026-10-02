@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 摇一摇延长睡眠定时的震动反馈（功能4） -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 仅 Android 9 及以下需要：把同步配置写到公共目录（10+ 走 MediaStore，无需权限） -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -28,6 +30,34 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- B 站外链分享导入：点 bilibili.com 的视频/音频链接打开 App -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="www.bilibili.com" />
+                <data android:host="m.bilibili.com" />
+                <data android:host="bilibili.com" />
+                <data android:pathPrefix="/video/" />
+                <data android:pathPrefix="/audio/" />
+            </intent-filter>
+            <!-- b23.tv 短链路径随机，不加 pathPrefix -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="b23.tv" />
+            </intent-filter>
+            <!-- 系统分享面板「发送到 BiliTing」：接收纯文本分享文案 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
         <service
             android:name=".player.PlaybackService"
@@ -38,5 +68,29 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <!-- 桌面播放控件：4x2 宽版 -->
+        <receiver
+            android:name=".player.PlaybackWidgetWideProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wide_info" />
+        </receiver>
+
+        <!-- 桌面播放控件：2x2 紧凑版 -->
+        <receiver
+            android:name=".player.PlaybackWidgetCompactProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_compact_info" />
+        </receiver>
     </application>
 </manifest>

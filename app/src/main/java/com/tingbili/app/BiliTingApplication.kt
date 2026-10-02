@@ -3,6 +3,7 @@ package com.tingbili.app
 import android.app.Activity
 import android.app.Application
 import android.util.Log
+import com.tingbili.app.BuildConfig
 import com.tingbili.app.data.api.AudioApi
 import com.tingbili.app.data.api.AuthorApi
 import com.tingbili.app.data.api.BiliApiService
@@ -46,7 +47,7 @@ class BiliTingApplication : Application() {
         super.onCreate()
         _instance = this
         installCrashHandler()
-        Log.i(TAG_BANNER, "=== BiliTing v0.19.5 ===")
+        Log.i(TAG_BANNER, "=== BiliTing v${BuildConfig.VERSION_NAME} ===")
         runCatching { AppImageLoader.get(this) }
             .onFailure { Log.e(TAG_BANNER, "AppImageLoader 初始化失败", it) }
         try {
@@ -54,6 +55,20 @@ class BiliTingApplication : Application() {
             Log.i(TAG_BANNER, "AppDatabase open ok: version=${appDatabase.openHelper.readableDatabase.version}")
         } catch (t: Throwable) {
             Log.e(TAG_BANNER, "AppDatabase init failed, falling back to destructive rebuild", t)
+            // 删库前先把损坏库（含 -wal/-shm）拷到 filesDir/brokenDbBackup-<ts>/，留证便于事后排查
+            runCatching {
+                val ts = System.currentTimeMillis()
+                val dir = File(filesDir, "brokenDbBackup-$ts")
+                dir.mkdirs()
+                arrayOf("bili_ting.db", "bili_ting.db-wal", "bili_ting.db-shm").forEach { n ->
+                    val src = getDatabasePath(n)
+                    if (src.exists()) src.copyTo(File(dir, n), overwrite = true)
+                }
+                Log.w(TAG_BANNER, "AppDatabase 损坏库已备份到 $dir.absolutePath")
+                runCatching {
+                    File(filesDir, "crash.log").appendText("-- DB 损坏删库 @ $ts reason=${t.javaClass.simpleName} msg=${t.message} backup=${dir.absolutePath}" + System.lineSeparator())
+                }
+            }
             runCatching { deleteDatabase("bili_ting.db") }
             try {
                 appDatabase = AppDatabase.get(this)
@@ -72,7 +87,11 @@ class BiliTingApplication : Application() {
             // 播放器自动跨进了占位项：占位项自己的下标就是"该播哪一集"（别再加一，那是跳集）
             playerHolder.onSeekToPartRequested = { index ->
                 applicationScope.launch(Dispatchers.Main) {
-                    runCatching { playerLauncher.jumpToPart(index) }
+                    // index 落在已补全队列里就直接跳；队列未补全（单集初始）时按 bvid 重解析下一集
+                    runCatching {
+                        val q = playerHolder.currentQueue()
+                        if (index in q.indices) playerLauncher.jumpToPart(index) else playerLauncher.playNextPartIfAny()
+                    }
                         .onFailure {
                             Log.w(TAG_BANNER, "切集失败（$index）：${it.message}")
                             com.tingbili.app.util.ErrorBus.post(message = "切集失败：${it.message ?: "网络异常"}")
@@ -80,6 +99,15 @@ class BiliTingApplication : Application() {
                 }
             }
             // 冷启动迷你条处于"待播"态（只有 record，播放器是空的），点播放时补装载
+            // 本书最后一集播完 → 接听单下一本（跨书连播，开关在设置页）
+            playerHolder.onBookFinishedRequested = {
+                applicationScope.launch(Dispatchers.Main) {
+                    runCatching { playerLauncher.playNextBook() }.onFailure {
+                        Log.w(TAG_BANNER, "跨书连播失败：${it.message}")
+                        com.tingbili.app.util.ErrorBus.post(message = "接下一本失败：${it.message}")
+                    }
+                }
+            }
             playerHolder.onEmptyPlayRequested = {
                 applicationScope.launch(Dispatchers.Main) {
                     runCatching { playerLauncher.resumeCurrent() }
@@ -185,7 +213,18 @@ class BiliTingApplication : Application() {
         val holder = runCatching { playerHolder }.getOrNull() ?: return
         val launcher = runCatching { playerLauncher }.getOrNull() ?: return
         val check = runCatching { holder.checkStall() }.getOrNull() ?: return
-        Log.i(TAG_BANNER, "回到前台体检：needReload=${check.needReload} resumePlay=${check.resumePlay} pos=${check.atMs}")
+        Log.i(TAG_BANNER, "回到前台体检：needReload=${check.needReload} resumePlay=${check.resumePlay} pos=${check.atMs} advanceTo=${check.advanceTo}")
+        // 本集已播完且分P 队列里还有下一集：直接切下一集，不要再走换地址重装
+        // （换出来还是本集地址，播完又 ENDED，等于"点播放也无效"的后台复刻）。
+        if (check.advanceTo >= 0) {
+            Log.i(TAG_BANNER, "回到前台：本集已播完且有下一集，切到第 ${check.advanceTo} 集")
+            applicationScope.launch(Dispatchers.Main) {
+                // 队列可能还没补全：playNextPartIfAny 内部会按 bvid 重解析分P 列表
+                runCatching { launcher.playNextPartIfAny() }
+                    .onFailure { Log.w(TAG_BANNER, "回前台切集失败：${it.message}") }
+            }
+            return
+        }
         if (!check.needReload) return
         Log.i(
             TAG_BANNER,
@@ -205,7 +244,7 @@ class BiliTingApplication : Application() {
                 throwable.printStackTrace(PrintWriter(sw))
                 val body = buildString {
                     appendLine("=== BiliTing crash @ ${System.currentTimeMillis()} ===")
-                    appendLine("thread=${thread.name} build=v0.19.5")
+                    appendLine("thread=${thread.name} build=v${BuildConfig.VERSION_NAME}")
                     appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
                     appendLine(sw.toString())
                 }
@@ -214,6 +253,23 @@ class BiliTingApplication : Application() {
                 Log.i(TAG_CRASH, "===== SHORT-CRASH (给开发者) =====")
                 sw.toString().lineSequence().take(30).forEach { Log.i(TAG_CRASH, it) }
                 Log.i(TAG_CRASH, "===== /SHORT-CRASH =====")
+                // 同步写一条 Room crash_logs（进程正要死，阻塞无所谓；不做任何网络）。
+                // appDatabase 可能还没初始化（崩溃发生在 onCreate 早期），访问不到就跳过。
+                runCatching {
+                    val dao = appDatabase.crashLogDao()
+                    dao.insert(
+                        com.tingbili.app.data.local.CrashLog(
+                            timestamp = System.currentTimeMillis(),
+                            threadName = thread.name,
+                            exceptionType = throwable.javaClass.name,
+                            message = throwable.message,
+                            stackTrace = sw.toString(),
+                            deviceModel = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                            androidVersion = android.os.Build.VERSION.RELEASE
+                        )
+                    )
+                    dao.trimExcess(50)
+                }
             }.onFailure {
                 Log.e(TAG_CRASH, "写 crash.log 失败", it)
             }
@@ -227,6 +283,18 @@ class BiliTingApplication : Application() {
 
         @Volatile private var _instance: BiliTingApplication? = null
         fun get(): BiliTingApplication? = _instance
+
+        /**
+         * 外链分享导入：MainActivity 从 VIEW/SEND intent 里拿到链接后先存这儿，
+         * 主 UI（BiliNavHost）就绪后消费一次（消费即清空）。
+         */
+        val importLinkFlow: kotlinx.coroutines.flow.MutableStateFlow<String?> =
+            kotlinx.coroutines.flow.MutableStateFlow(null)
+
+        fun offerImportLink(text: String?) {
+            if (!text.isNullOrBlank()) importLinkFlow.value = text
+        }
+
     }
 }
 
@@ -236,7 +304,8 @@ class AppContainer(val app: BiliTingApplication) {
             var v = app.cookieStore.buvid3()
             if (v.isBlank()) {
                 v = WbiSigner.randomBuvid3()
-                app.cookieStore.save(v, "")
+                // 带上现有 cookie 原样回写，别用空串把用户登录态抹掉
+                app.cookieStore.save(v, app.cookieStore.cookieHeader())
             }
             v
         }
@@ -244,18 +313,37 @@ class AppContainer(val app: BiliTingApplication) {
         Log.w("AppContainer", "buvid3 初始化失败，改用临时值", e)
         WbiSigner.randomBuvid3()
     }
-    val baseCookie: String get() = "buvid3=$buvid3; buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+    /** buvid4 + b_nut 生成一次就复用（浏览器同语义）；每请求重掷会被 WAF 判成脚本流量 */
+    private val fingerprintCookie: String = runCatching {
+        runBlocking {
+            var (b4, nut) = app.cookieStore.fingerprint()
+            if (b4.isBlank() || nut <= 0L) {
+                b4 = WbiSigner.randomBuvid4()
+                nut = System.currentTimeMillis() / 1000
+                app.cookieStore.saveFingerprint(b4, nut)
+            }
+            "buvid4=$b4; b_nut=$nut"
+        }
+    }.getOrElse { e ->
+        Log.w("AppContainer", "匿名指纹持久化失败，本次进程内复用", e)
+        "buvid4=${WbiSigner.randomBuvid4()}; b_nut=${System.currentTimeMillis() / 1000}"
+    }
+    val baseCookie: String get() = "buvid3=$buvid3; $fingerprintCookie"
+    /** 用户登录 cookie（扫码/手贴），随存随取 */
+    val loginCookieProvider: () -> String = {
+        runCatching { kotlinx.coroutines.runBlocking { app.cookieStore.cookieHeader() } }.getOrDefault("")
+    }
     val cookieProvider: () -> String = {
-        val userCookie = runCatching { kotlinx.coroutines.runBlocking { app.cookieStore.cookieHeader() } }.getOrDefault("")
+        val userCookie = loginCookieProvider()
         if (userCookie.isNotBlank()) "$baseCookie; $userCookie" else baseCookie
     }
 
-    val biliService: BiliApiService = buildRetrofit(buildHttpClient(cookieProvider)).create(BiliApiService::class.java)
+    val biliService: BiliApiService = buildRetrofit(buildHttpClient(cookieProvider, loginCookieProvider)).create(BiliApiService::class.java)
     private val wbiKeys = WbiKeyStore(biliService)
 
     val searchApi = SearchApi(biliService, wbiKeys)
     val searchRepo = SearchRepository(searchApi)
-    val authorApi = AuthorApi(biliService, wbiKeys)
+    val authorApi = AuthorApi(biliService, wbiKeys, loginCookieProvider)
     val playRepo = PlayRepository(PlayUrlApi(biliService, wbiKeys), AudioApi(biliService), biliService, app)
     val downloadManager: com.tingbili.app.download.DownloadManager = runCatching {
         val client = buildHttpClient(cookieProvider)

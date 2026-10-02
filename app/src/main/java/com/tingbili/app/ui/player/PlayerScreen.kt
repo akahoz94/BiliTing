@@ -26,10 +26,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -86,6 +90,7 @@ fun PlayerScreen(
     LaunchedEffect(Unit) { viewModel.bind() }
     DisposableEffect(Unit) { onDispose { viewModel.saveProgress() } }
     val s by viewModel.state.collectAsState()
+    val showMarkPrompt by viewModel.showMarkPrompt.collectAsState()
     val record = s.record
     if (record == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -119,6 +124,7 @@ fun PlayerScreen(
     var showSleep by remember { mutableStateOf(false) }
     var showParts by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showIntro by remember { mutableStateOf(false) }
     val partsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val fav = s.record?.isFavorite == true
 
@@ -142,6 +148,20 @@ fun PlayerScreen(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = { showIntro = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.FastForward,
+                        contentDescription = "跳过片头",
+                        tint = if (record.introSec > 0) MaterialTheme.colorScheme.primary else contentColor
+                    )
+                }
+                IconButton(onClick = viewModel::markCurrentPosition) {
+                    Icon(
+                        imageVector = if (record.markPart != null) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                        contentDescription = "标记睡前位置",
+                        tint = if (record.markPart != null) MaterialTheme.colorScheme.primary else contentColor
+                    )
+                }
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(
                         imageVector = if (fav) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -303,6 +323,36 @@ fun PlayerScreen(
             ) {
                 Text(FormatUtil.progress(s.positionMs), style = MaterialTheme.typography.bodySmall, color = contentColor)
                 Text(FormatUtil.progress(s.durationMs), style = MaterialTheme.typography.bodySmall, color = contentColor)
+            }
+
+            // 常驻睡前书签行：点整行跳回去补听，点 ✕ 清除。无标记时不占位置。
+            record.markPart?.let { mp ->
+                val mm = record.markMs ?: 0L
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                        .clickable { viewModel.jumpToMark() },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "📌 第 $mp 集 ${FormatUtil.progress(mm)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { viewModel.clearMark() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "清除标记",
+                            tint = contentColor.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -544,6 +594,66 @@ fun PlayerScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showSleep = false }) { Text("关闭") } }
+        )
+    }
+
+    if (showMarkPrompt && record.markPart != null) {
+        val mp = record.markPart ?: 1
+        val mm = record.markMs ?: 0L
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissMarkPrompt() },
+            title = { Text("📌 睡前标记") },
+            text = { Text("睡前标记在第 $mp 集 ${FormatUtil.progress(mm)}，要跳回去补听吗？") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.jumpToMark() }) { Text("回去补听") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissMarkPrompt() }) { Text("忽略") }
+            }
+        )
+    }
+
+    if (showIntro) {
+        var pending by remember { mutableStateOf(record.introSec.toFloat().coerceIn(0f, 90f)) }
+        AlertDialog(
+            onDismissRequest = { showIntro = false },
+            title = { Text("跳过片头") },
+            text = {
+                Column {
+                    Text(
+                        "这本书每一集开头跳过 ${pending.toInt()} 秒" +
+                            if (pending.toInt() == 0) "（不跳）" else "，下一集起生效",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = pending,
+                        onValueChange = { pending = it },
+                        valueRange = 0f..90f,
+                        steps = 17
+                    )
+                    TextButton(
+                        onClick = {
+                            pending = (s.positionMs / 1000L).coerceIn(0L, 90L).toFloat()
+                        }
+                    ) { Text("用刚才听到的位置（${(s.positionMs / 1000L).coerceIn(0L, 90L)} 秒）") }
+                    Text(
+                        "做法：听到片头结束、正文开始，就来点这个按钮。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.setIntroSec(pending.toInt()); showIntro = false }) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { viewModel.setIntroSec(0); showIntro = false }) { Text("不跳") }
+                    TextButton(onClick = { showIntro = false }) { Text("关闭") }
+                }
+            }
         )
     }
 

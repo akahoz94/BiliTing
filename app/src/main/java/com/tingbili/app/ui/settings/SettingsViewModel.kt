@@ -52,7 +52,9 @@ class SettingsViewModel(
     val immersiveMode: StateFlow<Int> = store.immersiveMode.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val paletteStrength: StateFlow<Int> = store.paletteStrength.stateIn(viewModelScope, SharingStarted.Eagerly, 60)
     val autoNextEnabled: StateFlow<Boolean> = store.autoNextEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val autoNextBookEnabled: StateFlow<Boolean> = store.autoNextBookEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val rememberSpeedPerAuthor: StateFlow<Boolean> = store.rememberSpeedPerAuthor.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val shakeExtendEnabled: StateFlow<Boolean> = store.shakeExtendEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     /** 云端备份目录（WebDAV 下的子路径） */
     val cloudDir: StateFlow<String> = store.cloudDir.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_CLOUD_DIR)
     /** 历史备份密码：只用于打开"升级前用独立加密密码存的"旧云端备份 */
@@ -63,6 +65,9 @@ class SettingsViewModel(
     val lastSyncAt: StateFlow<Long> = store.lastSyncAt.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val cookieHeader: StateFlow<String> = cookieStore.cookieFlow()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    /** 是否存在扫码备份（扫码成功过就有，据此显示「退出扫码登录」入口） */
+    val hasScanBackup: StateFlow<Boolean> = cookieStore.scanBackupFlow()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** 当前使用的匿名 cookie（未登录时自动生成） */
     val anonymousCookie: String get() = app.container.baseCookie
@@ -129,7 +134,10 @@ class SettingsViewModel(
     fun setImmersiveMode(v: Int) = viewModelScope.launch { store.setImmersiveMode(v) }
     fun setPaletteStrength(v: Int) = viewModelScope.launch { store.setPaletteStrength(v) }
     fun setAutoNextEnabled(v: Boolean) = viewModelScope.launch { store.setAutoNextEnabled(v) }
+
+    fun setAutoNextBookEnabled(v: Boolean) = viewModelScope.launch { store.setAutoNextBookEnabled(v) }
     fun setRememberSpeedPerAuthor(v: Boolean) = viewModelScope.launch { store.setRememberSpeedPerAuthor(v) }
+    fun setShakeExtendEnabled(v: Boolean) = viewModelScope.launch { store.setShakeExtendEnabled(v) }
 
     /** 保存 B 站登录 cookie（用户从浏览器复制粘贴的整段 cookie 字符串） */
     fun setCookie(raw: String) {
@@ -140,9 +148,14 @@ class SettingsViewModel(
         _busy.value = true
         viewModelScope.launch {
             val buvid3 = runCatching { cookieStore.buvid3() }.getOrDefault("")
-            val r = runCatching { cookieStore.save(buvid3, cleaned) }
+            // CookieStore.save 内部已经 runCatching 并返回 Result（永不抛），
+            // 再套一层 runCatching 会让 isSuccess 恒真、写盘失败也提示"已保存"
+            val r = cookieStore.save(buvid3, cleaned)
+            // 手贴的就是用户此刻认定的完整 cookie，扫码备份（扫码前那份）已经陈旧，
+            // 再拿它当「退出扫码登录」的目标只会退回旧值，所以直接作废。
+            if (r.isSuccess) runCatching { cookieStore.popScanBackup() }
             _busy.value = false
-            _msg.value = if (r.isSuccess) "已保存，下次启动生效" else "保存失败：${r.exceptionOrNull()?.message}"
+            _msg.value = if (r.isSuccess) "已保存，立即生效" else "保存失败：${r.exceptionOrNull()?.message}"
         }
     }
 
@@ -151,9 +164,33 @@ class SettingsViewModel(
         _busy.value = true
         viewModelScope.launch {
             val buvid3 = runCatching { cookieStore.buvid3() }.getOrDefault("")
-            runCatching { cookieStore.save(buvid3, "") }
+            val r = cookieStore.save(buvid3, "")
             _busy.value = false
-            _msg.value = "已清空 cookie"
+            _msg.value = if (r.isSuccess) "已清空 cookie" else "清空失败：${r.exceptionOrNull()?.message}"
+        }
+    }
+
+    /**
+     * 退出扫码登录：恢复扫码前的 cookie，一个字段不动（扫码登录是第二层保障，
+     * 第一层手贴 cookie 必须能完整找回）。没扫码过则无操作。
+     */
+    fun undoScanLogin() {
+        _busy.value = true
+        viewModelScope.launch {
+            val restored = runCatching { cookieStore.popScanBackup() }.getOrNull()
+            if (restored == null) {
+                _busy.value = false
+                _msg.value = "没有可撤销的扫码登录"
+                return@launch
+            }
+            val buvid3 = runCatching { cookieStore.buvid3() }.getOrDefault("")
+            val r = cookieStore.save(buvid3, restored)
+            _busy.value = false
+            _msg.value = when {
+                r.isFailure -> "退出失败：${r.exceptionOrNull()?.message}"
+                restored.isBlank() -> "已退出扫码登录，回到未登录（匿名）状态"
+                else -> "已退出扫码登录，扫码前粘贴的 cookie 原样恢复"
+            }
         }
     }
 
@@ -205,6 +242,13 @@ class SettingsViewModel(
             }.onFailure { Log.w("SettingsViewModel", "pre-restore snapshot failed", it) }
             val r = client.restore()
             r.fold({ payload ->
+                // 云端 404 / 空备份会被 restore 当成"成功但零条"返回，
+                // 直接 replaceAll 就等于把本地听单清空 —— 空包一律不动本地。
+                if (payload.records.isEmpty()) {
+                    _busy.value = false
+                    _msg.value = "云端没有可恢复的记录（路径或云目录名不对？）· 本地数据未改动"
+                    return@fold
+                }
                 app.container.libraryRepo.replaceAll(payload.records)
                 payload.settings?.let { store.importSnapshot(it) }
                 _msg.value = "已恢复 ${payload.records.size} 条 + 设置（旧数据已另存为云端快照）"

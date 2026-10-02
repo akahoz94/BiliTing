@@ -115,6 +115,32 @@ class PlayerLauncher(
         }
     }
 
+    /**
+     * 跨书连播：本书最后一集播完，按听单顺序接下一本（进度/倍速/片头设置各书自己带，
+     * 因为走的是 [playRecord] 那条正常装载路径）。
+     * 只认"当前这本书在听单里的下一本"——当前书不在听单（从历史/下载进来的）就不硬接，
+     * 免得睡前听着听着被塞进一本毫不相干的。
+     */
+    suspend fun playNextBook() {
+        val cur = holder.record.value ?: return
+        val s = settings ?: return
+        if (s.autoNextBookEnabled.firstOrNull() != true) return
+        val title = cur.title.ifBlank { "这本书" }
+        val list = library.playlist()
+        val idx = list.indexOfFirst { it.id == cur.id }
+        if (idx < 0) {
+            com.tingbili.app.util.ErrorBus.post("《$title》播完 · 它不在听单里，没接下一本")
+            return
+        }
+        val next = list.getOrNull(idx + 1)
+        if (next == null) {
+            com.tingbili.app.util.ErrorBus.post("听单已经听到最后一本了，晚安")
+            return
+        }
+        com.tingbili.app.util.ErrorBus.post("《$title》播完，接《${next.title.ifBlank { "下一本" }}》")
+        playRecord(next)
+    }
+
     /** 落盘播放记录，但不要把已存的进度/时长抹成 0 */
     private suspend fun markPlayed(r: BookRecord, keep: BookRecord) =
         library.recordPlayed(r.copy(progressMs = keep.progressMs, durationMs = keep.durationMs))
@@ -171,19 +197,21 @@ class PlayerLauncher(
 
     private suspend fun enrichAuthor(r: BookRecord): BookRecord = withContext(Dispatchers.IO) {
         val bvid = r.bvid ?: return@withContext r
-        try {
-            val resp = biliService.view(bvid)
-            val o = resp.data?.owner
-            if (o != null && o.mid > 0L) {
-                Log.i("PlayerLauncher", "view 兜底反查 UP：${o.name} mid=${o.mid}")
-                r.copy(
-                    owner = o.name.ifBlank { r.owner },
-                    ownerMid = o.mid,
-                    ownerAvatar = o.face.ifBlank { r.ownerAvatar }
-                )
-            } else r
-        } catch (t: Throwable) {
-            Log.w("PlayerLauncher", "view 兜底失败：${t.message}")
+        // view(bvid) 同时补 title/cover：resolveVideo 构造的 BookRecord 这两项为空，
+        // 分享/粘贴/冷启动 pending 等导入路径都经过这里，空值不覆盖原值。
+        runCatching {
+            val d = biliService.view(bvid)?.data ?: return@withContext r
+            val o = d.owner
+            Log.i("PlayerLauncher", "view 兜底：title=${d.title} owner=${o?.name} mid=${o?.mid}")
+            r.copy(
+                title = r.title.ifBlank { d.title },
+                cover = r.cover.ifBlank { d.cover },
+                owner = r.owner.ifBlank { o?.name.orEmpty() },
+                ownerMid = if (r.ownerMid > 0L) r.ownerMid else (o?.mid ?: 0L),
+                ownerAvatar = r.ownerAvatar.ifBlank { o?.face.orEmpty() }
+            )
+        }.getOrElse {
+            Log.w("PlayerLauncher", "view 兜底失败：${it.message}")
             r
         }
     }
@@ -229,15 +257,69 @@ class PlayerLauncher(
         playQueueItem(queue, index)
     }
 
-    private suspend fun playQueueItem(queue: List<PartItem>, index: Int) {
+    /**
+     * 切到下一集。优先用已补全的分P 队列；队列还没补全时（playRecord 常见路径：已有 currentCid
+     * 初始队列只有 1 项，分P 靠后台协程 resolveVideo→updateQueue 补全）按 bvid 重新拉完整分P
+     * 列表再切——避免"补全失败/滞后时点播放仍从末尾重播本集、立刻又 ENDED"。
+     * 音频稿件（无 bvid）静默忽略；真单集/解析失败提示"没有下一集了"。整个函数 runCatching 兜底。
+     */
+    suspend fun playNextPartIfAny() {
+        runCatching {
+            val rec = holder.record.value ?: return
+            if (rec.bvid.isNullOrBlank()) return // 音频稿件/本地文件：没有"下一集"概念
+            val queue = holder.currentQueue()
+            val idx = holder.currentQueueIndex()
+            if (idx + 1 < queue.size) {
+                playQueueItem(queue, idx + 1)
+                return
+            }
+            // 队列未补全：重新解析分P 列表
+            val full = playRepo.resolveVideo(rec.bvid)?.second
+            if (full == null || full.size <= idx + 1) {
+                com.tingbili.app.util.ErrorBus.post("没有下一集了")
+                return
+            }
+            holder.updateQueue(full, idx)
+            playQueueItem(full, idx + 1)
+        }.onFailure {
+            Log.w("PlayerLauncher", "playNextPartIfAny 失败：${it.message}")
+            com.tingbili.app.util.ErrorBus.post("切下一集失败：${it.message}")
+        }
+    }
+
+    private suspend fun playQueueItem(queue: List<PartItem>, index: Int, positionMs: Long = 0L) {
         val item = queue[index]
-        Log.i("PlayerLauncher", "playQueueItem index=$index part=${item.part} cid=${item.cid}")
+        Log.i("PlayerLauncher", "playQueueItem index=$index part=${item.part} cid=${item.cid} pos=$positionMs")
         val url = playRepo.resolveAudioUrl(item.bvid, item.cid, null) ?: return
         val cur = holder.record.value ?: return
         // 切集要沿用当前倍速：写死 1.0f 会让"1.5 倍速听了一集，下一集变回原速"
         val speed = cur.speed.takeIf { it > 0.05f && it < 4f } ?: 1.0f
         val r = cur.copy(currentCid = item.cid, currentPart = index + 1, progressMs = 0L, speed = speed)
-        holder.play(r, url, queue, 0L, speed, startIndex = index)
+        holder.play(r, url, queue, positionMs.coerceAtLeast(0L), speed, startIndex = index)
         library.recordPlayed(r)
+    }
+
+    /**
+     * 睡前标记跳转：回到"上次睡着的地方"。
+     * - 无标记直接 return；
+     * - 同集（queueIndex == 标记集，或队列为空的音频稿件）→ 原地 seek 到标记 ms 并继续播；
+     * - 跨集 → 切到标记那一集（带 positionMs）再播。
+     * 读 holder 状态走主线程（ExoPlayer 操作 verifyApplicationThread，项目已知坑）。
+     */
+    suspend fun jumpToMark() {
+        val rec = holder.record.value ?: return
+        val markPart = rec.markPart ?: return
+        val markMs = rec.markMs ?: return
+        val partIndex = (markPart - 1).coerceAtLeast(0)
+        val queue = holder.currentQueue()
+        Log.i("PlayerLauncher", "jumpToMark rec=${rec.id} markPart=$markPart partIndex=$partIndex ms=$markMs queueSize=${queue.size}")
+        if (queue.isEmpty() || partIndex == holder.currentQueueIndex()) {
+            // 同集 / 音频稿件：原地拖到标记点
+            holder.seekTo(markMs)
+            if (!holder.isPlaying()) holder.togglePlay()
+        } else {
+            if (partIndex !in queue.indices) return
+            playQueueItem(queue, partIndex, positionMs = markMs)
+        }
     }
 }

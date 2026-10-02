@@ -63,6 +63,7 @@ import com.tingbili.app.player.PartItem
 import com.tingbili.app.player.PlayerHolder
 import com.tingbili.app.player.PlayerLauncher
 import com.tingbili.app.util.CoverUtil
+import com.tingbili.app.util.ErrorBus
 import com.tingbili.app.util.FormatUtil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -178,11 +179,15 @@ fun MiniPlayerBar(
 
     val launcher = BiliTingApplication.get()?.container?.playerLauncher
 
-    // 冷启动后播放器是空的（只有展示用 record）：先唤醒装载，再执行控制动作
+    // 冷启动后播放器是空的（只有展示用 record）：先唤醒装载，再执行控制动作。
+    // resumeCurrent/action 内部都会走 Retrofit 解析播放地址，断网会抛 IOException；
+    // rememberCoroutineScope 不捕获异常就会把整个进程带崩，这里统一 runCatching 兜底。
     fun control(action: suspend PlayerLauncher.() -> Unit) {
         scope.launch {
             val l = launcher ?: return@launch
-            if (holder.hasMedia()) l.action() else l.resumeCurrent()
+            runCatching {
+                if (holder.hasMedia()) l.action() else l.resumeCurrent()
+            }.onFailure { ErrorBus.post(message = "播放失败：${it.message ?: "网络异常"}") }
         }
     }
 
@@ -288,7 +293,14 @@ fun MiniPlayerBar(
                     if (holder.hasMedia()) holder.togglePlay()
                     else {
                         isLoading = true
-                        scope.launch { launcher?.resumeCurrent(); isLoading = false }
+                        scope.launch {
+                            try {
+                                runCatching { launcher?.resumeCurrent() }
+                                    .onFailure { ErrorBus.post(message = "播放失败：${it.message ?: "网络异常"}") }
+                            } finally {
+                                isLoading = false
+                            }
+                        }
                     }
                 },
                 modifier = Modifier

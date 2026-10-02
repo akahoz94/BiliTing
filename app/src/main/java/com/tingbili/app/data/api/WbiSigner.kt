@@ -43,7 +43,8 @@ object WbiSigner {
         return "${block(8)}-${block(4)}-${block(4)}-${block(4)}-${block(12)}"
     }
 
-    private fun encode(s: String): String =
+    /** 与 B站 wbi 规范一致的 URL 编码（空格 %20、* %2A）；internal 供编码往返自检测试使用 */
+    internal fun encode(s: String): String =
         java.net.URLEncoder.encode(s, "UTF-8")
             .replace("+", "%20").replace("*", "%2A")
 

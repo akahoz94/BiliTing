@@ -43,6 +43,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.tingbili.app.BiliTingApplication
+import com.tingbili.app.data.api.LinkParser
+import com.tingbili.app.data.api.ShortLinkWebViewResolver
+import com.tingbili.app.data.api.LinkResult
 import com.tingbili.app.data.api.dto.SearchItem
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.player.PlayerLauncher
@@ -53,6 +56,7 @@ import com.tingbili.app.ui.history.HistoryScreen
 import com.tingbili.app.ui.player.PlayerScreen
 import com.tingbili.app.ui.search.SearchScreen
 import com.tingbili.app.ui.settings.SettingsScreen
+import com.tingbili.app.ui.login.LoginScreen
 import com.tingbili.app.ui.playlist.PlaylistScreen
 import com.tingbili.app.util.ErrorBus
 import com.tingbili.app.ui.stats.StatsScreen
@@ -98,6 +102,16 @@ fun BiliNavHost() {
                 if (result == SnackbarResult.ActionPerformed) {
                     err.retry?.invoke()
                 }
+            }
+        }
+    }
+
+    // 外链分享导入：collect Flow，覆盖冷启动 + 前台运行中再分享两种场景。
+    LaunchedEffect(Unit) {
+        BiliTingApplication.importLinkFlow.collect { raw ->
+            if (raw != null) {
+                consumePendingImport(container, launcher, raw)
+                BiliTingApplication.importLinkFlow.value = null
             }
         }
     }
@@ -257,6 +271,15 @@ fun BiliNavHost() {
                     onBack = { navController.popBackStack() },
                     onOpenStats = { navController.navigate("stats") },
                     onOpenDownloads = { navController.navigate("downloads") },
+                    onOpenCrashLogs = { navController.navigate("crash_logs") },
+                    onOpenLogin = { navController.navigate("login") },
+                    modifier = Modifier.padding(padding)
+                )
+            }
+
+            composable("login", enterTransition = { slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(300)) }, exitTransition = { slideOutHorizontally(tween(300)) { -it / 4 } + fadeOut(tween(300)) }, popEnterTransition = { slideInHorizontally(tween(300)) { -it / 4 } + fadeIn(tween(300)) }, popExitTransition = { slideOutHorizontally(tween(300)) { it / 4 } + fadeOut(tween(300)) }) {
+                LoginScreen(
+                    onBack = { navController.popBackStack() },
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -268,9 +291,11 @@ fun BiliNavHost() {
                 )
             }
             composable("author?mid={mid}&name={name}&avatar={avatar}") { entry ->
-                val mid = entry.arguments?.getString("mid")?.toLongOrNull() ?: 0L
-                val name = entry.arguments?.getString("name").orEmpty()
-                val avatar = entry.arguments?.getString("avatar").orEmpty()
+                // 用 arguments["mid"] 取原值再 toString：Bundle.getString() 对非 String（Long/Int）
+                // 直接返回 null，那样 mid 会静默变成 0，UP 主主页就永远空
+                val mid = entry.arguments?.get("mid")?.toString()?.toLongOrNull() ?: 0L
+                val name = entry.arguments?.get("name")?.toString().orEmpty()
+                val avatar = entry.arguments?.get("avatar")?.toString().orEmpty()
                 AuthorScreen(
                     mid = mid,
                     name = name,
@@ -289,6 +314,65 @@ fun BiliNavHost() {
                     onOpenPlayer = { navController.navigate("player") }
                 )
             }
+            composable("crash_logs") {
+                com.tingbili.app.ui.debug.CrashLogsScreen(onBack = { navController.popBackStack() })
+            }
         }
+    }
+}
+
+/**
+ * 消费外链分享导入：解析 bvid/auid → 收藏进听单（isFavorite）→ 直接播放（已有在播也切过去，不询问）。
+ * 标题拉取失败不阻塞导入；非 B 站链接静默提示。
+ */
+private suspend fun consumePendingImport(
+    container: com.tingbili.app.AppContainer,
+    launcher: PlayerLauncher,
+    raw: String
+) {
+    var text = raw
+    // b23.tv 短链本身不含 bvid/auid，先跟一次重定向拿落地 URL
+    if (raw.contains("b23.tv", ignoreCase = true)) {
+        LinkParser.resolveShortLink(raw, container.cookieProvider)?.let { text = it }
+        // OkHttp 被 412 风控时落地 URL 仍是 b23.tv → 换 WebView 兜底通道再试一次
+        if (LinkParser.parse(text) == null) {
+            runCatching {
+                ShortLinkWebViewResolver.resolve(container.app, raw)?.let { text = it }
+            }
+        }
+    }
+    when (val r = LinkParser.parse(text)) {
+        is LinkResult.Bvid -> {
+            val id = "video:${r.bvid}"
+            val v = runCatching { container.biliService.view(r.bvid)?.data }.getOrNull()
+            val title = v?.title.orEmpty()
+            val cover = v?.cover.orEmpty()
+            val ownerName = v?.owner?.name.orEmpty()
+            val ownerMid = v?.owner?.mid ?: 0L
+            val rec = BookRecord(
+                id = id, title = title, owner = ownerName, type = "video", cover = cover,
+                bvid = r.bvid, ownerMid = ownerMid,
+                isFavorite = true, favoriteAt = System.currentTimeMillis()
+            )
+            container.libraryRepo.recordPlayed(rec)
+            container.libraryRepo.toggleFavorite(id, true)
+            runCatching { launcher.playRecord(rec) }
+                .onFailure { ErrorBus.post(message = "导入播放失败：${it.message ?: "网络异常"}") }
+            ErrorBus.post(message = "已导入：${title.ifBlank { r.bvid }}")
+        }
+        is LinkResult.Auid -> {
+            val id = "audio:${r.auid}"
+            val title = runCatching { container.biliService.audioInfo(r.auid)?.data?.title }.getOrNull().orEmpty()
+            val rec = BookRecord(
+                id = id, title = title, owner = "", type = "audio",
+                auid = r.auid, isFavorite = true, favoriteAt = System.currentTimeMillis()
+            )
+            container.libraryRepo.recordPlayed(rec)
+            container.libraryRepo.toggleFavorite(id, true)
+            runCatching { launcher.playRecord(rec) }
+                .onFailure { ErrorBus.post(message = "导入播放失败：${it.message ?: "网络异常"}") }
+            ErrorBus.post(message = "已导入：${title.ifBlank { "au${r.auid}" }}")
+        }
+        null -> ErrorBus.post(message = "仅支持 B 站视频/音频链接（BVxxx / audio / b23.tv）")
     }
 }

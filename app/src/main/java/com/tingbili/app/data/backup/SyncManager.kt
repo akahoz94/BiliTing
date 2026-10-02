@@ -147,7 +147,12 @@ class SyncManager(
             sortOrder = l.sortOrder,
             // 标签取并集：字段里存的是分号分隔的多标签，两边各自挂上的标签都要留住，
             // 否则会出现"在 A 设备打的标签被 B 设备的旧数据覆盖掉"
-            tag = encodeTags(l.tagSet() + r.tagSet())
+            tag = encodeTags(l.tagSet() + r.tagSet()),
+            // 睡前标记 / 跳过片头：都是"我在这台设备上听"的私有设置，云端旧副本不该打回默认
+            markPart = l.markPart, markMs = l.markMs, markAt = l.markAt,
+            introSec = l.introSec,
+            // 听完归档：任一台设备标记听完就算听完（不可逆动作，取并集最安全）
+            isFinished = l.isFinished || r.isFinished
         )
     }
 }

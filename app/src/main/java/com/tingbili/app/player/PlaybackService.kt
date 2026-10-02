@@ -5,6 +5,9 @@ import android.content.Intent
 import android.util.Log
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 后台播放服务（系统通知栏 / 锁屏控件 / Android Auto / Wear OS 的关键）。
@@ -51,6 +54,28 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     /**
+     * 桌面 Widget 按钮走这里：PendingIntent 指向 service action。
+     * 必须在主线程调 PlayerHolder（getter/setter 校验线程），onStartCommand 本来就在主线程。
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        runCatching {
+            val app = applicationContext as com.tingbili.app.BiliTingApplication
+            when (intent?.action) {
+                ACTION_PLAY_PAUSE -> app.playerHolder.togglePlayPause()
+                ACTION_PREV -> CoroutineScope(Dispatchers.Main.immediate).launch {
+                    runCatching { app.playerLauncher.prevPart() }
+                }
+                ACTION_NEXT -> CoroutineScope(Dispatchers.Main.immediate).launch {
+                    runCatching { app.playerLauncher.nextPart() }
+                }
+            }
+        }.onFailure { Log.w(TAG, "widget action 处理失败: ${it.message}") }
+        // 处理完刷新一次控件图标（播放↔暂停）
+        runCatching { WidgetUpdater.updateAll(this) }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    /**
      * 不覆写 onTaskRemoved：media3 自带实现已经是"正在播就继续跑，没在播才 pause 并停服"，
      * 自己再写一遍只会引入差异（曾经写成"只要不是 playWhenReady 就 stopSelf"，
      * 与官方 isPlaybackOngoing() 判定不一致，划掉任务时容易把正在播的会话掐掉）。
@@ -71,5 +96,8 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         private const val TAG = "PlaybackService"
+        const val ACTION_PLAY_PAUSE = "com.tingbili.app.widget.PLAY_PAUSE"
+        const val ACTION_PREV = "com.tingbili.app.widget.PREV"
+        const val ACTION_NEXT = "com.tingbili.app.widget.NEXT"
     }
 }

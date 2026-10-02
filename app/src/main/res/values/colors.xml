@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1F2430</color>
+    <!-- 桌面 Widget 浅色卡片配色（B站粉 accent） -->
+    <color name="widget_accent">#FB7299</color>
+    <color name="widget_card_bg">#FFF8F0</color>
+    <color name="widget_text_primary">#2A2A33</color>
+    <color name="widget_text_secondary">#6B6B76</color>
 </resources>

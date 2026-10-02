@@ -92,6 +92,7 @@ class SettingsStore(private val context: Context) {
     private val keyPlaylistGroupMode = intPreferencesKey("playlist_group_mode")
     private val keyPaletteStrength = intPreferencesKey("palette_strength")
     private val keyAutoNextEnabled = booleanPreferencesKey("auto_next_enabled")
+    private val keyAutoNextBookEnabled = booleanPreferencesKey("auto_next_book_enabled")
     private val keyRememberSpeedPerAuthor = booleanPreferencesKey("remember_speed_per_author")
     /** 最近搜索词（最多 10 条；每条一行） */
     private val keySearchHistory = stringPreferencesKey("search_history")
@@ -108,6 +109,8 @@ class SettingsStore(private val context: Context) {
     private val keyListeningMs = stringPreferencesKey("listening_ms")
     /** 启动时自动同步听单/收藏/进度/设置 */
     private val keyAutoSyncEnabled = booleanPreferencesKey("auto_sync_enabled")
+    /** 摇一摇延长睡眠定时：定时激活时摇一下手机延长 15 分钟 */
+    private val keyShakeExtendEnabled = booleanPreferencesKey("shake_extend_enabled")
     /** 上次成功同步的时间戳（0 = 从未同步过） */
     private val keyLastSyncAt = longPreferencesKey("last_sync_at")
     /** 云端备份目录（WebDAV 下的子路径，默认 BiliTing；支持 "a/b" 多级） */
@@ -156,8 +159,16 @@ class SettingsStore(private val context: Context) {
      * 否则老用户一升级就不再自动续播）。关掉等价于「播完停下来」。
      */
     val autoNextEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextEnabled] ?: true }.failSafe("auto_next_enabled", true)
+    /**
+     * 设置项「播完本书自动播放听单下一本」，默认开 —— 听书是连载，睡前放着不管，
+     * 一本书听完就该接着下一本，否则整晚就停在最后一集的末尾干等。
+     * 只在"本书最后一集播完"时生效，且受「播完本集自动停止」和睡眠定时压制。
+     */
+    val autoNextBookEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoNextBookEnabled] ?: true }.failSafe("auto_next_book_enabled", true)
     val rememberSpeedPerAuthor: Flow<Boolean> = dataStore.data.map { it[keyRememberSpeedPerAuthor] ?: false }.failSafe("remember_speed_per_author", false)
     val autoSyncEnabled: Flow<Boolean> = dataStore.data.map { it[keyAutoSyncEnabled] ?: true }.failSafe("auto_sync_enabled", true)
+    /** 摇一摇延长睡眠定时，默认开 */
+    val shakeExtendEnabled: Flow<Boolean> = dataStore.data.map { it[keyShakeExtendEnabled] ?: true }.failSafe("shake_extend_enabled", true)
     val lastSyncAt: Flow<Long> = dataStore.data.map { it[keyLastSyncAt] ?: 0L }.failSafe("last_sync_at", 0L)
 
     /** 云端备份目录：空白/含非法字符时回落默认值，避免拼出坏 URL */
@@ -218,7 +229,9 @@ class SettingsStore(private val context: Context) {
         if (v) p[keySleepEndOfTrack] = false
     }
     suspend fun setRememberSpeedPerAuthor(v: Boolean) = write("remember_speed_per_author") { it[keyRememberSpeedPerAuthor] = v }
+    suspend fun setAutoNextBookEnabled(v: Boolean) = write("auto_next_book_enabled") { it[keyAutoNextBookEnabled] = v }
     suspend fun setAutoSyncEnabled(v: Boolean) = write("auto_sync_enabled") { it[keyAutoSyncEnabled] = v }
+    suspend fun setShakeExtendEnabled(v: Boolean) = write("shake_extend_enabled") { it[keyShakeExtendEnabled] = v }
     suspend fun setLastSyncAt(v: Long) = write("last_sync_at") { it[keyLastSyncAt] = v }
     suspend fun setCloudDir(v: String) = write("webdav_cloud_dir") { it[keyCloudDir] = v.trim() }
     suspend fun setLegacyBackupPass(v: String) = write("legacy_backup_pass") { it[keyLegacyBackupPass] = v }
@@ -333,12 +346,14 @@ class SettingsStore(private val context: Context) {
             immersiveMode = prefs[keyImmersiveMode] ?: 0,
             paletteStrength = prefs[keyPaletteStrength] ?: 60,
             autoNextEnabled = prefs[keyAutoNextEnabled] ?: true,
+            autoNextBookEnabled = prefs[keyAutoNextBookEnabled] ?: true,
             rememberSpeedPerAuthor = prefs[keyRememberSpeedPerAuthor] ?: false,
             playlistGroupMode = prefs[keyPlaylistGroupMode] ?: 0,
             keywords = (prefs[keyKeywords] ?: Defaults.KEYWORDS).toList(),
             shelfFolders = prefs[keyShelfFolders] ?: "",
             authorSpeedMap = prefs[keyAuthorSpeedMap] ?: "",
-            listeningMs = prefs[keyListeningMs] ?: ""
+            listeningMs = prefs[keyListeningMs] ?: "",
+            shakeExtendEnabled = prefs[keyShakeExtendEnabled] ?: true
         )
     }
 
@@ -358,12 +373,14 @@ class SettingsStore(private val context: Context) {
             prefs[keyImmersiveMode] = s.immersiveMode
             prefs[keyPaletteStrength] = s.paletteStrength
             prefs[keyAutoNextEnabled] = autoNext
+            prefs[keyAutoNextBookEnabled] = s.autoNextBookEnabled
             prefs[keyRememberSpeedPerAuthor] = s.rememberSpeedPerAuthor
             prefs[keyPlaylistGroupMode] = s.playlistGroupMode
             prefs[keyKeywords] = s.keywords.toSet()
             prefs[keyShelfFolders] = s.shelfFolders
             prefs[keyAuthorSpeedMap] = s.authorSpeedMap
             prefs[keyListeningMs] = s.listeningMs
+            prefs[keyShakeExtendEnabled] = s.shakeExtendEnabled
         }
     }
 }
@@ -379,10 +396,12 @@ data class SettingsSnapshot(
     val immersiveMode: Int = 0,
     val paletteStrength: Int = 60,
     val autoNextEnabled: Boolean = true,
+    val autoNextBookEnabled: Boolean = true,
     val rememberSpeedPerAuthor: Boolean = false,
     val playlistGroupMode: Int = 0,
     val keywords: List<String> = emptyList(),
     val shelfFolders: String = "",
     val authorSpeedMap: String = "",
-    val listeningMs: String = ""
+    val listeningMs: String = "",
+    val shakeExtendEnabled: Boolean = true
 )

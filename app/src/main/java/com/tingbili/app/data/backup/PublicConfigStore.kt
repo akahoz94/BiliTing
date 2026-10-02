@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -56,6 +57,9 @@ object PublicConfigStore {
         ok
     }
 
+    // 调用方（save/load/clear）已在 SDK_INT>=Q 分支里调用，但 lint 不会跨方法传播这个守卫，
+    // 所以这里显式声明所需 API 级别，消除 NewApi 告警。
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveViaMediaStore(context: Context, json: String): Boolean = runCatching {
         val resolver = context.contentResolver
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
@@ -104,6 +108,7 @@ object PublicConfigStore {
             ?.takeIf { isConfigured(it) }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun readViaMediaStore(context: Context): String? = runCatching {
         val uri = findUriViaMediaStore(context) ?: return@runCatching null
         context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -117,6 +122,7 @@ object PublicConfigStore {
         if (f.exists()) f.readText(Charsets.UTF_8) else null
     }.onFailure { Log.e(TAG, "readViaFile failed", it) }.getOrNull()
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun findUriViaMediaStore(context: Context): Uri? = runCatching {
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"

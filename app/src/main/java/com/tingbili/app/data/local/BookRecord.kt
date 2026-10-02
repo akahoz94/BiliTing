@@ -2,6 +2,7 @@ package com.tingbili.app.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 import kotlinx.serialization.Serializable
 
 @Entity(tableName = "book_records")
@@ -39,7 +40,20 @@ data class BookRecord(
      *
      * 读取一律用 [tagSet]，写入一律用 [encodeTags]，不要自己 split/join。
      */
-    val tag: String = ""
+    val tag: String = "",
+    /**
+     * 睡前标记（"听到这儿睡着的，下次跳回来补听"）。一本书一个标记，新标记直接覆盖旧的。
+     * 三者同时为 null 表示无标记；非空即一组。markPart 是 1-based 集数。
+     * 可空列：旧库/旧备份没有这三列时回落 null（迁移见 AppDatabase.MIGRATION_7_8）。
+     */
+    @ColumnInfo("markPart") val markPart: Int? = null,
+    @ColumnInfo("markMs") val markMs: Long? = null,
+    @ColumnInfo("markAt") val markAt: Long? = null,
+    /**
+     * 跳过片头：这本书每一集开头要跳过的秒数（有声书普遍有 10~30 秒固定片头曲/开场白）。
+     * 一本书一个值，全书各集共用；0 = 不跳。装载起播位置时生效，见 PlayerHolder 的 introSkipTarget。
+     */
+    @ColumnInfo("introSec") val introSec: Int = 0
 )
 
 /** 把 "武侠;睡前" 拆成去空、去重后的标签列表 */

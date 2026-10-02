@@ -36,6 +36,13 @@ class AuthorViewModel(
         loadNext()
     }
 
+    /** 逐层都没拿到时重来一次：空首页不该把这一页判死 */
+    fun retry() {
+        page = 0
+        _state.value = _state.value.copy(videos = emptyList(), endReached = false, error = null)
+        loadNext()
+    }
+
     fun loadNext() {
         val s = _state.value
         if (s.loading || s.loadingMore || s.endReached) return
@@ -43,16 +50,20 @@ class AuthorViewModel(
         viewModelScope.launch {
             try {
                 val (list, total) = api.videos(mid, page + 1)
+                val firstPage = page == 0
                 page++
                 val all = _state.value.videos + list
                 val knownTotal = if (total > 0) total else _state.value.total
+                // 首页拿到空列表一定是出了问题（风控 / mid 坏），不是"这UP主没投稿"：
+                // 把逐层探测数字摊到页面上，并把这一页留成可重试，别一失败就 endReached 判死。
+                val stuckEmpty = list.isEmpty() && firstPage
                 _state.value = _state.value.copy(
                     videos = all,
                     total = knownTotal,
                     loading = false,
                     loadingMore = false,
-                    error = null,
-                    endReached = list.isEmpty() || knownTotal > 0 && all.size >= knownTotal
+                    error = if (stuckEmpty) "没拿到投稿 · ${api.lastProbe}" else null,
+                    endReached = !stuckEmpty && (list.isEmpty() || knownTotal > 0 && all.size >= knownTotal)
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(

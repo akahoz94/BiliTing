@@ -185,7 +185,11 @@ class WebDavBackup(
 
     /** 选要从云端拉哪一份：自动同步看 auto_sync，手动恢复看时间戳快照 */
     private fun pickTarget(names: List<String>, preferAuto: Boolean): String? {
-        val manual = names.firstOrNull { it.startsWith("backup_") }
+        // 手动备份文件名形如 backup_yyyyMMdd_HHmmss.bin：按内嵌时间戳倒序取最新一份，
+        // 不依赖 listBackups 的字典序（固定宽度时间戳下字典序恰好等于时间序，
+        // 但显式按时间戳挑更稳，也避免 auto_sync.bin / legacy 名混进来时取错）。
+        val manual = names.filter { it.startsWith("backup_") }
+            .maxByOrNull { it.removePrefix("backup_").substringBefore(".bin") }
         val auto = names.firstOrNull { it == AUTO_FILE }
         return if (preferAuto) auto ?: manual else manual ?: auto
     }

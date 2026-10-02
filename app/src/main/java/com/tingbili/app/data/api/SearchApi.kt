@@ -2,19 +2,21 @@ package com.tingbili.app.data.api
 
 import android.util.Log
 import com.tingbili.app.data.api.dto.SearchItem
-import okhttp3.FormBody
-import okhttp3.RequestBody
+import kotlinx.coroutines.delay
 
 class SearchApi(
     private val service: BiliApiService,
     private val keys: WbiKeyStore
 ) {
     /**
-     * 三层 waterfall：
+     * 两层 waterfall：
      *   1. /x/web-interface/wbi/search/type（带 wbi 签名）
-     *   2. /x/web-interface/search/all/v2（POST，无 wbi）
-     *   3. /search（GET，websearch，最宽松）
-     * 每层失败都自动 fallback；返回首个非空结果。
+     *   2. /x/web-interface/search/all/v2（GET，无 wbi）兜底
+     * B 站对新设备首次搜索（无 buvid cookie）和偶发风控会回 HTTP 200 + code=0 +
+     * 空 result，同时 set-cookie 下发 buvid3/buvid4，带上 cookie 的下一次就正常
+     * —— 所以第 1 层空结果/失败时等一下重试一次再判死（2026-09-28 实测）。
+     * 旧的第 3 层 /search 已被 B站强制 wbi 签名（code=-3 signature rejected），
+     * 是纯死代码，v0.24.5 删掉；v2 端点同期改为只收 GET（POST 回 405）。
      */
     suspend fun search(keyword: String, searchType: String = "video", page: Int = 1): List<SearchItem> {
         val apiSearchType = when (searchType) {
@@ -23,22 +25,20 @@ class SearchApi(
             else -> searchType
         }
 
-        // 1) wbi 端点
-        runCatching { searchOnceWbi(keyword, apiSearchType, page) }
-            .onSuccess { if (it.isNotEmpty()) return it }
-            .onFailure { Log.w(TAG, "wbi 端点失败: ${it.message}") }
+        // 1) wbi 端点：空结果或失败都重试一次（第二次请求已带上首刷下发的 cookie）
+        repeat(2) { attempt ->
+            runCatching { searchOnceWbi(keyword, apiSearchType, page) }
+                .onSuccess { if (it.isNotEmpty()) return it }
+                .onFailure { Log.w(TAG, "wbi 端点失败: ${it.message}") }
+            if (attempt == 0) delay(1500)
+        }
 
-        // 2) POST 兜底
+        // 2) v2 兜底（GET）
         runCatching { searchOnceFallback(keyword, page) }
             .onSuccess { if (it.isNotEmpty()) return it }
             .onFailure { Log.w(TAG, "v2 兜底失败: ${it.message}") }
 
-        // 3) websearch 兜底（最宽松）
-        runCatching { searchOnceWeb(keyword, apiSearchType, page) }
-            .onSuccess { if (it.isNotEmpty()) return it }
-            .onFailure { Log.w(TAG, "websearch 兜底失败: ${it.message}") }
-
-        Log.w(TAG, "三层端点都返回空: keyword='$keyword' type='$apiSearchType'")
+        Log.w(TAG, "两层端点都返回空: keyword='$keyword' type='$apiSearchType'")
         return emptyList()
     }
 
@@ -62,24 +62,8 @@ class SearchApi(
     }
 
     private suspend fun searchOnceFallback(keyword: String, page: Int): List<SearchItem> {
-        val body: RequestBody = FormBody.Builder()
-            .add("keyword", keyword)
-            .add("page", page.toString())
-            .add("page_size", "30")
-            .build()
-        val raw = service.searchFallback(body = body).string()
+        val raw = service.searchFallback(keyword = keyword, page = page).string()
         Log.d(TAG, "[2.v2] len=${raw.length}")
-        return parseSearchV2(raw)
-    }
-
-    private suspend fun searchOnceWeb(keyword: String, searchType: String, page: Int): List<SearchItem> {
-        val raw = service.searchWeb(
-            searchType = searchType,
-            keyword = keyword,
-            page = page,
-            pageSize = 30
-        ).string()
-        Log.d(TAG, "[3.web] len=${raw.length}")
         return parseSearchV2(raw)
     }
 

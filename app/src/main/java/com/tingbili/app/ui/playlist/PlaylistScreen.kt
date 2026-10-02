@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -64,11 +66,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tingbili.app.BiliTingApplication
 import com.tingbili.app.data.local.BookRecord
 import com.tingbili.app.data.local.tagSet
 import com.tingbili.app.ui.components.CoverImage
@@ -103,6 +107,8 @@ fun PlaylistScreen(
      */
     var sheetTargetId by remember { mutableStateOf<String?>(null) }
     var sheetOnTags by remember { mutableStateOf(false) }
+    // 顶栏"粘贴链接导入"对话框
+    var showImportDialog by remember { mutableStateOf(false) }
 
     val sheetRecord = sheetTargetId?.let { id -> allFavorites.firstOrNull { it.id == id } }
 
@@ -121,6 +127,9 @@ fun PlaylistScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = { showImportDialog = true }) {
+                        Icon(Icons.Outlined.Link, contentDescription = "粘贴链接导入")
+                    }
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Filled.Search, contentDescription = "搜索")
                     }
@@ -250,9 +259,57 @@ fun PlaylistScreen(
             }
         }
     }
-}
 
-/** 长按后的操作菜单（抽屉第一页） */
+    if (showImportDialog) {
+        var linkInput by remember { mutableStateOf("") }
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { showImportDialog = false },
+            title = {
+                Text(
+                    "导入链接",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = linkInput,
+                        onValueChange = { linkInput = it },
+                        placeholder = { Text("粘贴 B 站视频/音频链接（BV / b23.tv）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(AppTokens.Spacing2))
+                    TextButton(onClick = {
+                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        val clip = cm?.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            clip.getItemAt(0).text?.let { linkInput = it.toString() }
+                        }
+                    }) {
+                        Text("从剪贴板粘贴")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val raw = linkInput.trim()
+                    if (raw.isNotBlank()) {
+                        BiliTingApplication.offerImportLink(raw)
+                    }
+                    showImportDialog = false
+                }) { Text("导入") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportDialog = false }) { Text("取消") }
+            }
+        )
+    }
+}
 @Composable
 private fun PlaylistMenu(
     record: BookRecord,

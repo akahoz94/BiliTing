@@ -3,12 +3,14 @@ package com.tingbili.app.player
 import android.content.ComponentName
 import android.content.Context
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
+@OptIn(UnstableApi::class)
 class PlayerHolder(
     context: Context,
     private val settingsStore: com.tingbili.app.data.local.SettingsStore? = null
@@ -159,6 +162,9 @@ class PlayerHolder(
 
     /** 播放器自己跨进了占位项：参数 = 该占位项的下标 = 真正该播的那一集 */
     var onSeekToPartRequested: ((Int) -> Unit)? = null
+
+    /** 本书最后一集播完了 —— 上层决定要不要接听单里的下一本 */
+    var onBookFinishedRequested: (() -> Unit)? = null
     var onProgressPersist: (suspend (BookRecord) -> Unit)? = null
 
     /**
@@ -180,8 +186,13 @@ class PlayerHolder(
     /** 本次睡眠定时是"听完本集"还是"倒计时"：只用于触发后给一句不同的提示 */
     @Volatile private var sleepKindEndOfTrack = false
 
+    /** 摇一摇延长：开关（设置层订阅）+ 传感器监听器（仅倒计时激活期间注册） */
+    @Volatile private var shakeExtendEnabled: Boolean = true
+    private var shakeExtender: ShakeExtender? = null
+
     private val sleepTimer = SleepTimer(
         onFire = {
+            stopShakeListener()
             pause()
             setVolume(1f)
             sleepTotalMs = 0L
@@ -206,6 +217,7 @@ class PlayerHolder(
         _sleepRemainSec.value = minutes * 60
         _sleepEndOfTrack.value = false
         sleepTimer.start(minutes)
+        startShakeListener()
     }
 
     fun startSleepEndOfTrack() {
@@ -214,14 +226,60 @@ class PlayerHolder(
         sleepTotalMs = 0L
         _sleepRemainSec.value = -1
         _sleepEndOfTrack.value = true
+        startShakeListener()
     }
 
     fun stopSleep() {
+        stopShakeListener()
         sleepTimer.stop()
         setVolume(1f)
         sleepTotalMs = 0L
         _sleepRemainSec.value = -1
         _sleepEndOfTrack.value = false
+    }
+    /** 摇一摇延长定时：倒计时模式下加 minutes 分钟，重启淡出倒计时，震动 + 提示。 */
+    fun extendSleep(minutes: Int) {
+        val now = System.currentTimeMillis()
+        // 听完本集模式：取消本集末尾暂停，改为从现在起 minutes 分钟倒计时
+        if (sleepKindEndOfTrack || sleepTotalMs <= 0L) {
+            sleepTimer.stop()
+            sleepKindEndOfTrack = false
+            sleepTotalMs = minutes * 60_000L
+            sleepStartElapsed = now
+            _sleepRemainSec.value = minutes * 60
+            _sleepEndOfTrack.value = false
+            sleepTimer.start(minutes)
+            vibrateTick()
+            com.tingbili.app.util.ErrorBus.post("摇一摇：改为 $minutes 分钟后停止")
+            return
+        }
+        val remaining = sleepTotalMs - (now - sleepStartElapsed)
+        sleepTotalMs = remaining + minutes * 60_000L
+        sleepTimer.extend(sleepTotalMs - (System.currentTimeMillis() - sleepStartElapsed))
+        _sleepRemainSec.value = ((sleepTotalMs - (System.currentTimeMillis() - sleepStartElapsed)) / 1000L).toInt()
+        vibrateTick()
+        com.tingbili.app.util.ErrorBus.post("摇一摇：定时延长 $minutes 分钟，剩余 ${_sleepRemainSec.value / 60 + 1} 分钟")
+    }
+
+    /** 仅在倒计时激活期间注册加速度传感器；开关关/听完本集模式不注册。 */
+    private fun startShakeListener() {
+        if (!shakeExtendEnabled) return
+        if (shakeExtender != null) return
+        val ext = ShakeExtender(appContext) { extendSleep(15) }
+        shakeExtender = ext
+        ext.start()
+    }
+
+    private fun stopShakeListener() {
+        shakeExtender?.stop()
+        shakeExtender = null
+    }
+
+    private fun vibrateTick() {
+        runCatching {
+            val vib = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            vib?.vibrate(android.os.VibrationEffect.createOneShot(200, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        }
     }
 
     /**
@@ -294,6 +352,15 @@ class PlayerHolder(
             trackingScope.launch {
                 s.sleepEndOfTrack.collect { setStopAtEndEnabled(it) }
             }
+            // 音量增益也要在播放器层订阅：以前只在设置页改完那一刻调一次 setGain，
+            // App 进程重启后 gainProcessor 回到默认 1.0，用户设过的增益就"不生效"了。
+            // setGain 内部已 coerce 到 MIN_GAIN..MAX_GAIN。
+            trackingScope.launch {
+                s.audioGain.collect { setGain(it) }
+            }
+            trackingScope.launch {
+                s.shakeExtendEnabled.collect { shakeExtendEnabled = it }
+            }
         }
     }
 
@@ -333,6 +400,16 @@ class PlayerHolder(
                         sleepArmed -> sleepTimer.onPlaybackStopped()
                         stopAtEndEnabled -> com.tingbili.app.util.ErrorBus.post("本集已播完，已按设置停止播放")
                         !autoNextEnabled -> com.tingbili.app.util.ErrorBus.post("本集已播完，已停止（自动下一集已关闭）")
+                        // 分P 补全滞后/失败时 timeline 里没有"下一集占位项"：本集播完停在真实项末尾，
+                        // 播放器不会自己往前走。正常多集 timeline 播完会先切到占位项，那时
+                        // playing=false 的 current 已是占位项、isAtEndOfCurrentItem=false，不会走到这里。
+                        else -> {
+                            if (shouldAutoAdvance()) {
+                                if (queueIndex + 1 < queue.size) onSeekToPartRequested?.invoke(queueIndex + 1)
+                                // 没有下一集了 = 这本书听完，交给上层接听单下一本（跨书连播）
+                                else onBookFinishedRequested?.invoke()
+                            }
+                        }
                     }
                 }
             }
@@ -401,7 +478,23 @@ class PlayerHolder(
         // 但 ENDED + 真实项 是"本集听完了"，那是正常终态，绝不能去动它。
         val onPlaceholder = isCurrentItemPlaceholder(p)
         val dead = state == Player.STATE_IDLE || (state == Player.STATE_ENDED && onPlaceholder)
-        val stale = isUrlStale(nowMs)
+        // 「地址过期」只对**没在播**的情况才需要主动换：正在播的 HTTP 连接不会被 URL 里的 deadline 掐断，
+        // 而 lastResolvedAtMs 只在装载时刷新，听书一集 30~60 分钟必然超过 10 分钟保鲜期 ——
+        // 以前回前台无脑换址，等于每次切回来都 setMediaItems 清掉缓冲，用户听到的就是"停一下又自动播"。
+        // 真断了有 onPlayerError → tryAutoReload 兜底，不会变哑。
+        val stale = isUrlStale(nowMs) && !runCatching { p.isPlaying }.getOrDefault(false)
+        // 防御：本集已播完（停在真实项末尾）、自动下一集开着、队列里还有下一集，
+        // 但 timeline 没补全导致播放器没自己往前走 —— 这不是"健康终态"。
+        // 回前台时由上层切到下一集（见 onAppForeground 的 advanceTo 分支），别再当健康放过。
+        // 判定要跟 togglePlay 的切集分支一致：队列已补全且停在最后一集时没有"下一集"，
+        // 不能因为 record 带 bvid 就 advanceTo 越界下标（上层会静默返回或提示"没有下一集了"）。
+        if (state == Player.STATE_ENDED && !onPlaceholder &&
+            shouldAutoAdvance() &&
+            (queueIndex + 1 < queue.size || (queue.size <= 1 && _record.value?.bvid != null))
+        ) {
+            Log.i("PlayerHolder", "checkStall: 播完本集且有下一集，回前台切到 ${queueIndex + 1}")
+            return StallCheck(needReload = false, resumePlay = false, atMs = 0L, advanceTo = queueIndex + 1)
+        }
         if (!dead && !stale) {
             Log.i("PlayerHolder", "checkStall: 健康 state=$state 占位项=$onPlaceholder 距上次解析=${nowMs - lastResolvedAtMs}ms")
             return StallCheck(false, false, 0L)
@@ -419,7 +512,9 @@ class PlayerHolder(
         /** 装好之后要不要直接开播 */
         val resumePlay: Boolean,
         /** 要恢复到的进度 */
-        val atMs: Long
+        val atMs: Long,
+        /** 需要回前台时切到的集下标；-1 表示不需要切集（走正常 reload/健康逻辑） */
+        val advanceTo: Int = -1
     )
 
     /**
@@ -467,6 +562,7 @@ class PlayerHolder(
     private fun startTracking(p: ExoPlayer) {
         trackingScope.launch {
             var sinceSave = 0L
+            var widgetTick = 0
             while (true) {
                 kotlinx.coroutines.delay(1000)
                 // 睡眠定时状态每秒刷一次（StateFlow 写入，UI 直接 collect）
@@ -475,6 +571,12 @@ class PlayerHolder(
                         .toInt().coerceAtLeast(0)
                 } else -1
                 _sleepEndOfTrack.value = sleepTimer.isEndOfTrack()
+                // 桌面 Widget 进度/定时余量刷新（主线程读播放器状态，每 2 秒一次足够）
+                if (++widgetTick % 2 == 0) {
+                    kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+                        runCatching { WidgetUpdater.updateAll(appContext) }
+                    }
+                }
                 if (!shouldTrack) continue
                 val playing = kotlinx.coroutines.withContext(Dispatchers.Main) {
                     runCatching { p.isPlaying }.getOrDefault(false)
@@ -558,6 +660,7 @@ class PlayerHolder(
         startIndex: Int = 0,
         autoPlay: Boolean = true
     ) {
+        val startPos = introSkipTarget(positionMs, record.introSec)
         _record.value = record
         this.queue = queue
         this.queueIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
@@ -568,7 +671,7 @@ class PlayerHolder(
         userPlayIntent = autoPlay
 
         onMain {
-            player.setMediaItems(buildItems(record, audioUrl, queue, queueIndex), queueIndex, positionMs)
+            player.setMediaItems(buildItems(record, audioUrl, queue, queueIndex), queueIndex, startPos)
             player.playbackParameters = PlaybackParameters(speed)
             player.prepare()
             // autoPlay=false 是"只预装、等用户点"：回来恢复时用户本来是暂停的就别自己响
@@ -602,7 +705,10 @@ class PlayerHolder(
         onMain {
             val r = _record.value ?: return@onMain
             if (runCatching { player.mediaItemCount }.getOrDefault(0) >= newQueue.size) return@onMain
-            val pos = runCatching { player.currentPosition }.getOrDefault(0L)
+            // 播放器已停在本集末尾时 currentPosition≈时长；重建 timeline 若带着这个位置，
+            // 新补全的当前集会被直接定位到末尾、立刻又 ENDED。播完态一律从 0 起播。
+            val wasEnded = runCatching { player.playbackState }.getOrDefault(Player.STATE_IDLE) == Player.STATE_ENDED
+            val pos = if (wasEnded) 0L else runCatching { player.currentPosition }.getOrDefault(0L)
             val wasPlaying = runCatching { player.isPlaying }.getOrDefault(false)
             player.setMediaItems(buildItems(r, currentAudioUrl, newQueue, idx), idx, pos)
             player.prepare()
@@ -654,6 +760,25 @@ class PlayerHolder(
                         return@onMain
                     }
                     runCatching { player.prepare() }
+                }
+                // 本集真的播完了（停在真实项末尾，不是占位项）、自动下一集开着：
+                // 此时 prepare()+play() 只会从末尾重播本集、立刻又 ENDED —— 表现就是
+                // "播完后点播放也无效"。按队列状态分流：有下一集就切；队列还是单项
+                // （分P 未补全）就交给 playNextPartIfAny 补全后切；已是最后一集就从
+                // 头重播本集（此前会越界走 playNextPartIfAny → "没有下一集了"，
+                // 每次点播放都白拉一次分P 然后毫无反应）。
+                // sleepArmed/stopAtEnd/关掉自动下一集 时 shouldAutoAdvance()=false，不会走到这里。
+                if (st == Player.STATE_ENDED && !isCurrentItemPlaceholder(player) && shouldAutoAdvance()) {
+                    val nextIndex = queueIndex + 1
+                    val mayHaveNext = nextIndex < queue.size || (queue.size <= 1 && _record.value?.bvid != null)
+                    if (mayHaveNext) {
+                        Log.i("PlayerHolder", "本集播完且有下一集（$queueIndex/${queue.size}），直接切下一集")
+                        onSeekToPartRequested?.invoke(nextIndex)
+                    } else {
+                        Log.i("PlayerHolder", "本集播完且已是最后一集（$queueIndex/${queue.size}），从头重播")
+                        onReloadRequested?.invoke(0L, true)
+                    }
+                    return@onMain
                 }
                 userPlayIntent = true
                 // 地址已经超出保鲜期：现在 play() 只会把残留的几十秒缓冲放完再断掉，
@@ -724,4 +849,14 @@ class PlayerHolder(
         /** 两次自动重解析的最小间隔，防止错误回调密集时打成重试风暴 */
         const val AUTO_RELOAD_MIN_GAP_MS = 20_000L
     }
+}
+
+/**
+ * 跳过片头的起播位置：装载点落在片头之内就推到片头之后。
+ * 只在装载（[PlayerHolder.play]）时算，用户手动往回拖进度条不会重新装载，所以不跟他抢进度条。
+ */
+fun introSkipTarget(positionMs: Long, introSec: Int): Long {
+    val skipMs = introSec.coerceAtLeast(0) * 1000L
+    val pos = positionMs.coerceAtLeast(0L)
+    return if (skipMs > 0L && pos < skipMs) skipMs else pos
 }

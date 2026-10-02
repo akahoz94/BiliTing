@@ -1,5 +1,6 @@
 package com.tingbili.app
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
@@ -18,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleImportIntent(intent)
         val settings = (application as BiliTingApplication).settingsStore
         // 读一次已持久化的主题，让系统栏图标配色与主题保持一致。
         // SettingsStore 的 Flow 内部已统一加 runCatching 兜底；这里也再包一层 runBlocking 异常防护，
@@ -49,5 +51,25 @@ class MainActivity : ComponentActivity() {
             }
             BiliTingTheme(darkTheme = darkTheme, themeColor = themeColor) { BiliNavHost() }
         }
+    }
+
+    /** singleTop：App 已在前台时，从分享面板再次进来走这里。 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleImportIntent(intent)
+    }
+
+    /**
+     * 提取分享链接（ACTION_SEND 文案 / ACTION_VIEW 落地 URL），先存到 Application，
+     * 等 BiliNavHost 就绪后统一解析播放（冷启动时 UI 还没好，不能在这里直接播）。
+     */
+    private fun handleImportIntent(intent: Intent?) {
+        val text = when (intent?.action) {
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_VIEW -> intent.data?.toString()
+            else -> null
+        }
+        BiliTingApplication.offerImportLink(text)
     }
 }

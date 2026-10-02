@@ -1,4 +1,4 @@
-﻿package com.tingbili.app.ui.settings
+package com.tingbili.app.ui.settings
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.GraphicEq
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Folder
@@ -100,6 +102,8 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onOpenStats: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
+    onOpenCrashLogs: () -> Unit = {},
+    onOpenLogin: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)
 ) {
@@ -117,8 +121,10 @@ fun SettingsScreen(
     val immersiveMode by viewModel.immersiveMode.collectAsState()
     val paletteStrength by viewModel.paletteStrength.collectAsState()
     val autoNext by viewModel.autoNextEnabled.collectAsState()
+    val autoNextBook by viewModel.autoNextBookEnabled.collectAsState()
     val sleepEndOfTrack by viewModel.sleepEndOfTrack.collectAsState()
     val rememberSpeed by viewModel.rememberSpeedPerAuthor.collectAsState()
+    val shakeExtend by viewModel.shakeExtendEnabled.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val coverCacheSize by viewModel.coverCacheSize.collectAsState()
     val playCacheSize by viewModel.playCacheSize.collectAsState()
@@ -128,12 +134,14 @@ fun SettingsScreen(
 
     var showWebDav by remember { mutableStateOf(false) }
     var showCookie by remember { mutableStateOf(false) }
+    var showChangelog by remember { mutableStateOf(false) }
     // 后台保活：应用详情页/电池优化白名单的系统状态，进页面读一次，点开时再读一次
     val appCtx = LocalContext.current
     var showKeepAlive by remember { mutableStateOf(false) }
     var showGain by remember { mutableStateOf(false) }
     var ignoringBatteryOpt by remember { mutableStateOf(BatteryOptimization.isIgnoring(appCtx)) }
     val cookieHeader by viewModel.cookieHeader.collectAsState()
+    val hasScanBackup by viewModel.hasScanBackup.collectAsState()
     val hasSessdata = cookieHeader.contains("SESSDATA=", ignoreCase = true) ||
         cookieHeader.contains("sessdata=", ignoreCase = true)
 
@@ -243,10 +251,24 @@ fun SettingsScreen(
                         )
                         Divider()
                         SwitchRow(
+                            title = "播完本书接听单下一本",
+                            subtitle = "连载听到最后一集会自己接下一本；关掉就停在末尾等你点",
+                            checked = autoNextBook,
+                            onCheckedChange = viewModel::setAutoNextBookEnabled
+                        )
+                        Divider()
+                        SwitchRow(
                             title = "按 UP 主记忆倍速",
                             subtitle = "同一 UP 主下次播放自动用上次倍速",
                             checked = rememberSpeed,
                             onCheckedChange = viewModel::setRememberSpeedPerAuthor
+                        )
+                        Divider()
+                        SwitchRow(
+                            title = "摇一摇延长定时",
+                            subtitle = "睡眠定时激活时，摇一下手机延长 15 分钟",
+                            checked = shakeExtend,
+                            onCheckedChange = viewModel::setShakeExtendEnabled
                         )
                         Divider()
                         NavRow(
@@ -298,6 +320,13 @@ fun SettingsScreen(
                         )
                         Divider()
                         NavRow(
+                            icon = Icons.Filled.BugReport,
+                            title = "错误日志",
+                            subtitle = "上次崩溃堆栈，可复制反馈",
+                            onClick = onOpenCrashLogs
+                        )
+                        Divider()
+                        NavRow(
                             icon = Icons.Filled.Brush,
                             title = "清除封面缓存",
                             subtitle = "当前占用 $coverCacheSize",
@@ -320,6 +349,22 @@ fun SettingsScreen(
                                 "未登录 · 必填才能稳定下载 / 播放高画质",
                             onClick = { showCookie = true }
                         )
+                        Divider()
+                        NavRow(
+                            icon = Icons.Filled.QrCode2,
+                            title = "扫码登录 B 站",
+                            subtitle = "B站 App 扫二维码 · 已有 cookie 的其他字段会保留",
+                            onClick = onOpenLogin
+                        )
+                        if (hasScanBackup) {
+                            Divider()
+                            NavRow(
+                                icon = Icons.Filled.Key,
+                                title = "退出扫码登录",
+                                subtitle = "恢复扫码前粘贴的 cookie，一个字段不动",
+                                onClick = viewModel::undoScanLogin
+                            )
+                        }
                         Divider()
                         NavRow(
                             icon = Icons.Filled.Cloud,
@@ -349,8 +394,8 @@ fun SettingsScreen(
                         NavRow(
                             icon = Icons.Filled.Info,
                             title = "BiliTing",
-                            subtitle = "v" + com.tingbili.app.BuildConfig.VERSION_NAME + " (build " + com.tingbili.app.BuildConfig.VERSION_CODE + ")",
-                            onClick = {}
+                            subtitle = "v" + com.tingbili.app.BuildConfig.VERSION_NAME + " (build " + com.tingbili.app.BuildConfig.VERSION_CODE + ") · 看更新日志",
+                            onClick = { showChangelog = true }
                         )
                         Divider()
                         NavRow(
@@ -413,6 +458,30 @@ fun SettingsScreen(
             onDismiss = { showCookie = false },
             onSave = viewModel::setCookie,
             onClear = viewModel::clearCookie
+        )
+    }
+
+    if (showChangelog) {
+        AlertDialog(
+            onDismissRequest = { showChangelog = false },
+            title = {
+                Text(
+                    "更新日志",
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif)
+                )
+            },
+            text = {
+                Text(
+                    CHANGELOG_TEXT.trim(),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Serif),
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showChangelog = false }) { Text("关闭") }
+            }
         )
     }
 

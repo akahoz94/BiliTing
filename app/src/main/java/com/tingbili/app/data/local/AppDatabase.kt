@@ -7,9 +7,10 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [BookRecord::class], version = 7, exportSchema = false)
+@Database(entities = [BookRecord::class, CrashLog::class], version = 9, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookRecordDao(): BookRecordDao
+    abstract fun crashLogDao(): CrashLogDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -20,7 +21,8 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                        MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                        MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                        MIGRATION_8_9
                     )
                     .fallbackToDestructiveMigration()
                     .build()
@@ -62,6 +64,41 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book_records ADD COLUMN tag TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * v7 → v8：
+         *  1) book_records 加睡前标记三列（markPart/markMs/markAt，均可空）；
+         *  2) 新建 crash_logs 全局异常兜底表。
+         * 两条 SQL 同一次迁移并列执行（功能1 的 book_records 迁移与功能3 的 crash_logs 合并到同一版本）。
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_records ADD COLUMN markPart INTEGER")
+                db.execSQL("ALTER TABLE book_records ADD COLUMN markMs INTEGER")
+                db.execSQL("ALTER TABLE book_records ADD COLUMN markAt INTEGER")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS crash_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        threadName TEXT NOT NULL,
+                        exceptionType TEXT NOT NULL,
+                        message TEXT,
+                        stackTrace TEXT NOT NULL,
+                        deviceModel TEXT NOT NULL,
+                        androidVersion TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        /** v8 → v9：跳过片头秒数（每本书一个值，0 = 不跳） */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_records ADD COLUMN introSec INTEGER NOT NULL DEFAULT 0")
             }
         }
     }
